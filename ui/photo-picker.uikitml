@@ -1,0 +1,20 @@
+<panel id="photo-picker" width="600" height="400" background-color="#1a1a2e">
+  <text font-size="24" color="#ffffff" margin-bottom="20">
+    Select Photos for Your Museum
+  </text>
+  
+  <scroll-view height="300" width="580">
+    <grid id="photo-grid" columns="4" gap="10">
+      <!-- Photos will be dynamically inserted here -->
+    </grid>
+  </scroll-view>
+  
+  <row margin-top="20" justify-content="space-between">
+    <button id="btn-login" background-color="#4285f4" padding="10">
+      <text color="#ffffff">Sign in with Google</text>
+    </button>
+    <button id="btn-apply" background-color="#34a853" padding="10">
+      <text color="#ffffff">Apply Selection</text>
+    </button>
+  </row>
+</panel>

@@ -1,0 +1,34 @@
+{
+  "name": "xr-photo-museum",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "server": "npx -y tsx server/index.ts"
+  },
+  "dependencies": {
+    "@iwsdk/core": "0.2.2",
+    "express": "^5.1.0",
+    "socket.io": "^4.8.1",
+    "socket.io-client": "^4.8.1",
+    "three": "npm:super-three@0.177.0",
+    "uuid": "^13.0.0"
+  },
+  "devDependencies": {
+    "@iwsdk/vite-plugin-gltf-optimizer": "0.2.2",
+    "@iwsdk/vite-plugin-iwer": "0.2.2",
+    "@iwsdk/vite-plugin-uikitml": "0.2.2",
+    "@types/express": "^5.0.5",
+    "@types/three": "^0.178.1",
+    "@types/uuid": "^10.0.0",
+    "typescript": "^5.5.0",
+    "vite": "^7.1.4",
+    "vite-plugin-mkcert": "^1.17.0"
+  },
+  "engines": {
+    "node": ">=20.19.0"
+  }
+}
