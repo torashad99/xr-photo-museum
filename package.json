@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "server": "npx -y tsx server/index.ts",
+    "server": "npx -y tsx --watch server/index.ts",
     "start": "tsx server/index.ts"
   },
   "dependencies": {

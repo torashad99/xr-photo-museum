@@ -58,6 +58,25 @@ interface Annotation {
 
 const rooms = new Map<string, Room>();
 
+// Word list for generating passphrases
+const words = [
+  'puppy', 'cola', 'ocean', 'tiger', 'moon', 'star', 'cloud', 'river',
+  'apple', 'banana', 'cherry', 'dragon', 'eagle', 'falcon', 'guitar',
+  'piano', 'rocket', 'sunset', 'thunder', 'violet', 'wizard', 'yellow',
+  'anchor', 'breeze', 'coral', 'delta', 'ember', 'frost', 'glacier',
+  'harbor', 'island', 'jungle', 'karma', 'lemon', 'maple', 'noble',
+  'opal', 'panda', 'quartz', 'ruby', 'silver', 'topaz', 'ultra',
+  'velvet', 'walnut', 'xenon', 'yonder', 'zephyr', 'amber', 'blade',
+  'crystal', 'dune', 'echo', 'flame', 'gold', 'halo', 'iris', 'jade'
+];
+
+// Generate a random 2-word passphrase
+function generatePassphrase(): string {
+  const word1 = words[Math.floor(Math.random() * words.length)];
+  const word2 = words[Math.floor(Math.random() * words.length)];
+  return `${word1}-${word2}`;
+}
+
 // Generate invite link
 function generateInviteLink(roomId: string): string {
   return `${process.env.BASE_URL || 'https://localhost:8081'}?room=${roomId}`;
@@ -70,7 +89,7 @@ io.on('connection', (socket: Socket) => {
 
   // Create a new room
   socket.on('createRoom', (data: { username: string }, callback) => {
-    const roomId = uuidv4().substring(0, 8);
+    const roomId = generatePassphrase();
     const room: Room = {
       id: roomId,
       ownerId: userId,
