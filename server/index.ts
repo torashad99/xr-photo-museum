@@ -3,6 +3,11 @@ import express from 'express';
 import { createServer } from 'http';
 import { Server, Socket } from 'socket.io';
 import { v4 as uuidv4 } from 'uuid';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 const app = express();
 const httpServer = createServer(app);
@@ -11,6 +16,14 @@ const io = new Server(httpServer, {
     origin: "*",
     methods: ["GET", "POST"]
   }
+});
+
+// Serve static files from dist
+app.use(express.static(join(__dirname, '../dist')));
+
+// Handle all other routes by serving index.html
+app.get(/.*/, (req, res) => {
+  res.sendFile(join(__dirname, '../dist/index.html'));
 });
 
 interface Room {
@@ -188,6 +201,7 @@ io.on('connection', (socket: Socket) => {
   });
 });
 
-httpServer.listen(3001, '0.0.0.0', () => {
-  console.log('Multiplayer server running on port 3001');
+const PORT = process.env.PORT || 3001;
+httpServer.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
 });

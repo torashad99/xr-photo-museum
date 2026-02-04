@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "server": "npx -y tsx server/index.ts"
+    "server": "npx -y tsx server/index.ts",
+    "start": "tsx server/index.ts"
   },
   "dependencies": {
     "@iwsdk/core": "0.2.2",
@@ -15,6 +16,7 @@
     "socket.io": "^4.8.1",
     "socket.io-client": "^4.8.1",
     "three": "npm:super-three@0.177.0",
+    "tsx": "^4.19.0",
     "uuid": "^13.0.0"
   },
   "devDependencies": {
