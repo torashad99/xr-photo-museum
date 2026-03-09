@@ -1,6 +1,6 @@
 // src/components/MuseumRoom.ts
 import * as THREE from 'three';
-import { World, Entity, createComponent, Types } from '@iwsdk/core';
+import { World, Entity, createComponent, Types, LocomotionEnvironment } from '@iwsdk/core';
 
 // Museum Room tag component
 export const MuseumRoom = createComponent('MuseumRoom', {
@@ -23,7 +23,7 @@ export function createMuseumRoom(world: World): Entity {
   // We do not need to call addObject3D manually after this.
   const roomEntity = world.createTransformEntity(roomGroup);
 
-  // Floor
+  // Floor — needs its own entity for LocomotionEnvironment
   const floorGeometry = new THREE.PlaneGeometry(20, 20);
   const floorMaterial = new THREE.MeshStandardMaterial({
     color: 0x8B4513,
@@ -32,7 +32,8 @@ export function createMuseumRoom(world: World): Entity {
   const floor = new THREE.Mesh(floorGeometry, floorMaterial);
   floor.rotation.x = -Math.PI / 2;
   floor.receiveShadow = true;
-  roomGroup.add(floor);
+  const floorEntity = world.createTransformEntity(floor);
+  floorEntity.addComponent(LocomotionEnvironment);
 
   // Walls
   const wallMaterial = new THREE.MeshStandardMaterial({

@@ -8,6 +8,9 @@ export const Annotation = createComponent('Annotation', {
   timestamp: { type: Types.String, default: '0' },
 });
 
+// Track all annotation label meshes for per-frame Y-axis facing
+const annotationLabels: Set<THREE.Mesh> = new Set();
+
 export function createAnnotation(
   world: World,
   position: THREE.Vector3,
@@ -26,7 +29,8 @@ export function createAnnotation(
   const pin = new THREE.Mesh(pinGeometry, pinMaterial);
   group.add(pin);
 
-  // Text label (using sprite for always-facing camera)
+  // Text label — use a Mesh (PlaneGeometry) instead of Sprite so we can
+  // control rotation per-axis (Y-only billboard, not full spherical).
   const canvas = document.createElement('canvas');
   const context = canvas.getContext('2d')!;
   canvas.width = 256;
@@ -40,11 +44,19 @@ export function createAnnotation(
   context.fillText(text.substring(0, 30), canvas.width / 2, 40);
 
   const texture = new THREE.CanvasTexture(canvas);
-  const spriteMaterial = new THREE.SpriteMaterial({ map: texture });
-  const sprite = new THREE.Sprite(spriteMaterial);
-  sprite.scale.set(0.5, 0.125, 1);
-  sprite.position.y = 0.1;
-  group.add(sprite);
+  const labelGeometry = new THREE.PlaneGeometry(0.5, 0.125);
+  const labelMaterial = new THREE.MeshBasicMaterial({
+    map: texture,
+    transparent: true,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  });
+  const label = new THREE.Mesh(labelGeometry, labelMaterial);
+  label.name = 'annotationLabel';
+  label.position.y = 0.1;
+  group.add(label);
+
+  annotationLabels.add(label);
 
   group.position.copy(position);
 
@@ -56,4 +68,31 @@ export function createAnnotation(
   });
 
   return annotationEntity;
+}
+
+const _labelWorld = new THREE.Vector3();
+const _camWorld = new THREE.Vector3();
+
+/**
+ * Rotate all annotation labels to face the camera on the Y-axis only
+ * (cylindrical billboard). Call once per frame.
+ */
+export function updateAnnotationFacing(camera: THREE.Camera): void {
+  camera.getWorldPosition(_camWorld);
+
+  for (const label of annotationLabels) {
+    // Skip disposed labels
+    if (!label.parent) {
+      annotationLabels.delete(label);
+      continue;
+    }
+
+    label.getWorldPosition(_labelWorld);
+
+    const dx = _camWorld.x - _labelWorld.x;
+    const dz = _camWorld.z - _labelWorld.z;
+    // PlaneGeometry faces +Z by default; atan2(dx, dz) gives the Y rotation
+    // needed to point the plane's +Z toward the camera.
+    label.rotation.set(0, Math.atan2(dx, dz), 0);
+  }
 }

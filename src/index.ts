@@ -3,11 +3,13 @@ import { World } from '@iwsdk/core';
 import * as THREE from 'three';
 import { createMuseumRoom } from './components/MuseumRoom';
 import { createPhotoFrame, generateFramePositions, setFramePhoto } from './components/PhotoFrame';
-import { createAnnotation } from './components/Annotation';
+import { createAnnotation, updateAnnotationFacing } from './components/Annotation';
+import { createVoiceNote, updateVoiceNoteFacing } from './components/VoiceNote';
 import { GoogleAuthService } from './services/googleAuth';
 import { GooglePhotosService, MediaItem } from './services/photosService'
 import { MultiplayerService, RemoteUser } from './services/MultiplayerService';
-import { time } from 'three/tsl';
+import { CreativeInputSystem } from './components/CreativeInputSystem';
+import { startStroke, addPointToStroke } from './components/Drawing';
 // import { GaussianSplatWorld } from './components/GaussianSplatWorld';
 
 class PhotoMuseumApp {
@@ -16,6 +18,7 @@ class PhotoMuseumApp {
   private photosService: GooglePhotosService | null = null;
   private multiplayer: MultiplayerService;
   private remoteAvatars: Map<string, THREE.Object3D> = new Map();
+  private creativeInput: CreativeInputSystem | null = null;
   // private gaussianSplatWorld: GaussianSplatWorld | null = null;
   private inSplatWorld: boolean = false;
 
@@ -31,7 +34,12 @@ class PhotoMuseumApp {
     const container = document.getElementById('scene-container') as HTMLDivElement;
     if (!container) throw new Error('Scene container not found');
 
-    this.world = await World.create(container);
+    // Inject 'microphone' into XR session features BEFORE World.create()
+    // so the auto-offered session includes mic access. Quest Browser blocks
+    // SpeechRecognition / getUserMedia during immersive sessions without it.
+    injectXRMicrophoneFeature();
+
+    this.world = await World.create(container, { features: { locomotion: true } });
 
     // Check for OAuth callback
     if (window.location.hash.includes('access_token')) {
@@ -59,7 +67,10 @@ class PhotoMuseumApp {
     this.setupMultiplayerCallbacks();
 
     // Join or create room
-    const username = prompt('Enter your name:') || 'Anonymous';
+    // prompt() is unreliable in Quest Browser's VR mode — it may block
+    // the thread or be invisible while wearing the headset.
+    const urlUsername = urlParams.get('name');
+    const username = urlUsername || 'User_' + Math.random().toString(36).substring(2, 7);
 
     if (roomId) {
       await this.multiplayer.joinRoom(roomId, username);
@@ -69,8 +80,13 @@ class PhotoMuseumApp {
       // Show invite link in UI
     }
 
-    // Start render loop
-    this.startRenderLoop();
+    this.creativeInput = new CreativeInputSystem(this.world, this.multiplayer);
+
+    // Hook into the IWSDK's existing render loop (which uses setAnimationLoop
+    // and correctly switches to XRSession.requestAnimationFrame in WebXR).
+    // Do NOT use a separate requestAnimationFrame loop — it stops firing
+    // once an XR session is active on Quest Browser.
+    this.setupFrameHook();
   }
 
   private setupMultiplayerCallbacks(): void {
@@ -105,6 +121,28 @@ class PhotoMuseumApp {
         annotation.color,
         annotation.userId
       );
+    });
+
+    this.multiplayer.setOnVoiceNoteAdded((data) => {
+      const audioBlob = new Blob([data.audioData], { type: 'audio/webm' });
+      const audioUrl = URL.createObjectURL(audioBlob);
+      createVoiceNote(
+        this.world,
+        new THREE.Vector3(data.position.x, data.position.y, data.position.z),
+        audioUrl
+      );
+    });
+
+    this.multiplayer.setOnStrokeAdded((stroke) => {
+      // Recreate remote stroke
+      const firstPoint = new THREE.Vector3(stroke.points[0].x, stroke.points[0].y, stroke.points[0].z);
+      const { line, points } = startStroke(this.world, stroke.color, firstPoint);
+
+      // Add rest of points
+      for (let i = 1; i < stroke.points.length; i++) {
+        const p = new THREE.Vector3(stroke.points[i].x, stroke.points[i].y, stroke.points[i].z);
+        addPointToStroke(line, p, points);
+      }
     });
   }
 
@@ -175,33 +213,55 @@ class PhotoMuseumApp {
   //   this.inSplatWorld = false;
   // }
 
-  private startRenderLoop(): void {
-    let lastTime = performance.now();
+  private setupFrameHook(): void {
+    // Wrap world.update so our per-frame logic runs inside the IWSDK's
+    // setAnimationLoop callback — which uses XRSession.requestAnimationFrame
+    // in WebXR and therefore keeps firing on Quest Browser.
+    const originalUpdate = this.world.update.bind(this.world);
+    this.world.update = (delta: number, time: number) => {
+      // Run the original IWSDK update first (processes input, ECS systems, etc.)
+      originalUpdate(delta, time);
 
-    const animate = (currentTime: number) => {
-      requestAnimationFrame(animate);
-
-      // Calculate delta (in seconds) and time (in seconds)
-      const delta = (currentTime - lastTime) / 1000;
-      const time = currentTime / 1000;
-      lastTime = currentTime;
-
-      // Update multiplayer positions
+      // Sync local camera pose to other users
       const camera = this.world.camera;
       this.multiplayer.updatePosition(
         camera.position,
         camera.quaternion
       );
 
-      // // Update Gaussian splat if in splat world
-      // if (this.inSplatWorld && this.gaussianSplatWorld) {
-      //   this.gaussianSplatWorld.update();
-      // }
+      // Update creative input (drawing & annotations)
+      this.creativeInput?.update(delta, time);
 
-      this.world.update(delta, time);
+      // Rotate labels to face the camera on Y-axis only
+      updateAnnotationFacing(camera);
+      updateVoiceNoteFacing(camera);
     };
+  }
+}
 
-    requestAnimationFrame(animate);
+/**
+ * Monkey-patch navigator.xr session methods to include the 'microphone'
+ * optional feature. The IWSDK's XRFeatureOptions doesn't expose a microphone
+ * field, but Quest Browser requires it for mic access during immersive sessions.
+ */
+function injectXRMicrophoneFeature(): void {
+  if (!navigator.xr) return;
+
+  const patchInit = (init?: XRSessionInit): XRSessionInit => {
+    init = init || {};
+    const opts = init.optionalFeatures ? [...init.optionalFeatures] : [];
+    if (!opts.includes('microphone')) opts.push('microphone');
+    return { ...init, optionalFeatures: opts };
+  };
+
+  const origRequest = navigator.xr.requestSession.bind(navigator.xr);
+  navigator.xr.requestSession = (mode: XRSessionMode, init?: XRSessionInit) =>
+    origRequest(mode, patchInit(init));
+
+  if ('offerSession' in navigator.xr) {
+    const origOffer = (navigator.xr as any).offerSession.bind(navigator.xr);
+    (navigator.xr as any).offerSession = (mode: string, init?: XRSessionInit) =>
+      origOffer(mode, patchInit(init));
   }
 }
 

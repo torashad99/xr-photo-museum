@@ -203,6 +203,12 @@ io.on('connection', (socket: Socket) => {
     }
   });
 
+  // Relay voice notes to other users in the room
+  socket.on('addVoiceNote', (data: { position: { x: number; y: number; z: number }; audioData: ArrayBuffer }) => {
+    if (!currentRoomId) return;
+    socket.to(currentRoomId).emit('voiceNoteAdded', data);
+  });
+
   // Handle disconnect
   socket.on('disconnect', () => {
     if (currentRoomId) {

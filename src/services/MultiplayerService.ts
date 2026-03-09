@@ -18,6 +18,7 @@ export class MultiplayerService {
   private onUserMoved: ((userId: string, pos: THREE.Vector3, rot: THREE.Quaternion) => void) | null = null;
   private onPhotosUpdated: ((photos: any[]) => void) | null = null;
   private onAnnotationAdded: ((annotation: any) => void) | null = null;
+  private onVoiceNoteAdded: ((data: { position: { x: number, y: number, z: number }, audioData: ArrayBuffer }) => void) | null = null;
 
   constructor() {
     this.socket = io();
@@ -56,6 +57,14 @@ export class MultiplayerService {
 
     this.socket.on('annotationAdded', (annotation) => {
       this.onAnnotationAdded?.(annotation);
+    });
+
+    this.socket.on('strokeAdded', (stroke) => {
+      this.onStrokeAdded?.(stroke);
+    });
+
+    this.socket.on('voiceNoteAdded', (data) => {
+      this.onVoiceNoteAdded?.(data);
     });
   }
 
@@ -117,6 +126,13 @@ export class MultiplayerService {
     });
   }
 
+  emitStroke(points: THREE.Vector3[], color: string): void {
+    this.socket.emit('addStroke', {
+      points: points.map(p => ({ x: p.x, y: p.y, z: p.z })),
+      color
+    });
+  }
+
   // Event handlers
   setOnUserJoined(callback: (user: RemoteUser) => void): void {
     this.onUserJoined = callback;
@@ -136,6 +152,19 @@ export class MultiplayerService {
 
   setOnAnnotationAdded(callback: (annotation: any) => void): void {
     this.onAnnotationAdded = callback;
+  }
+
+  private onStrokeAdded: ((stroke: { points: { x: number, y: number, z: number }[], color: string }) => void) | null = null;
+  setOnStrokeAdded(callback: (stroke: { points: { x: number, y: number, z: number }[], color: string }) => void): void {
+    this.onStrokeAdded = callback;
+  }
+
+  emitVoiceNote(position: { x: number, y: number, z: number }, audioData: ArrayBuffer): void {
+    this.socket.emit('addVoiceNote', { position, audioData });
+  }
+
+  setOnVoiceNoteAdded(callback: (data: { position: { x: number, y: number, z: number }, audioData: ArrayBuffer }) => void): void {
+    this.onVoiceNoteAdded = callback;
   }
 
   getRemoteUsers(): Map<string, RemoteUser> {
