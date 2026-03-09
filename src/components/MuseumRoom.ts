@@ -14,7 +14,7 @@ export const PhotoFrame = createComponent('PhotoFrame', {
   frameIndex: { type: Types.Int8, default: 0 },
 });
 
-export function createMuseumRoom(world: World): Entity {
+export function createMuseumRoom(world: World): { roomEntity: Entity; floorEntity: Entity } {
 
   // Create room geometry
   const roomGroup = new THREE.Group();
@@ -79,5 +79,5 @@ export function createMuseumRoom(world: World): Entity {
   // Assuming MuseumRoom is the Component definition
   roomEntity.addComponent(MuseumRoom);
 
-  return roomEntity;
+  return { roomEntity, floorEntity };
 }

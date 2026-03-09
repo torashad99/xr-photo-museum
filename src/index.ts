@@ -1,5 +1,5 @@
 // src/index.ts
-import { World } from '@iwsdk/core';
+import { World, Entity } from '@iwsdk/core';
 import * as THREE from 'three';
 import { createMuseumRoom } from './components/MuseumRoom';
 import { createPhotoFrame, generateFramePositions, setFramePhoto } from './components/PhotoFrame';
@@ -10,7 +10,11 @@ import { GooglePhotosService, MediaItem } from './services/photosService'
 import { MultiplayerService, RemoteUser } from './services/MultiplayerService';
 import { CreativeInputSystem } from './components/CreativeInputSystem';
 import { startStroke, addPointToStroke } from './components/Drawing';
-// import { GaussianSplatWorld } from './components/GaussianSplatWorld';
+import { createPortalFrame, PortalFrameHandle } from './components/PortalFrame';
+import { createPortalUI, PortalUIHandle, PortalButtonState } from './components/PortalUI';
+import { GaussianSplatWorld } from './components/GaussianSplatWorld';
+import { createBoundaryGuard, BoundaryGuardHandle } from './components/BoundaryGuard';
+import { WorldLabsService, SplatResult } from './services/WorldLabsService';
 
 class PhotoMuseumApp {
   private world!: World;
@@ -19,8 +23,24 @@ class PhotoMuseumApp {
   private multiplayer: MultiplayerService;
   private remoteAvatars: Map<string, THREE.Object3D> = new Map();
   private creativeInput: CreativeInputSystem | null = null;
-  // private gaussianSplatWorld: GaussianSplatWorld | null = null;
   private inSplatWorld: boolean = false;
+
+  // Portal / Splat world
+  private portalFrame: PortalFrameHandle | null = null;
+  private portalUI: PortalUIHandle | null = null;
+  private gaussianSplatWorld: GaussianSplatWorld | null = null;
+  private boundaryGuard: BoundaryGuardHandle | null = null;
+  private worldLabsService: WorldLabsService = new WorldLabsService();
+  private cachedSplatResult: SplatResult | null = null;
+
+  // Museum entities for hide/show
+  private roomEntity: Entity | null = null;
+  private floorEntity: Entity | null = null;
+  private frameEntities: Entity[] = [];
+
+  // Hardcoded portal image (for debugging)
+  private readonly PORTAL_IMAGE_URL = '/portal-image.jpg';
+  private readonly PORTAL_IMAGE_NAME = 'Portal World';
 
   constructor() {
     // this.world will be initialized in init()
@@ -55,13 +75,37 @@ class PhotoMuseumApp {
     const roomId = urlParams.get('room');
 
     // Create museum room
-    createMuseumRoom(this.world);
+    const { roomEntity, floorEntity } = createMuseumRoom(this.world);
+    this.roomEntity = roomEntity;
+    this.floorEntity = floorEntity;
 
-    // Generate photo frames
+    // Generate photo frames — skip index 0 (reserved for portal)
     const framePositions = generateFramePositions(18);
     framePositions.forEach((pos, index) => {
-      createPhotoFrame(this.world, pos, index);
+      if (index === 0) return; // Portal frame goes here instead
+      const entity = createPhotoFrame(this.world, pos, index);
+      this.frameEntities.push(entity);
     });
+
+    // Create portal frame at position 0 (back wall center)
+    const portalPos = framePositions[0];
+    this.portalFrame = createPortalFrame(this.world, portalPos, this.PORTAL_IMAGE_URL);
+
+    // Check cache to determine initial button state
+    const cached = await this.worldLabsService.checkCache(this.PORTAL_IMAGE_URL);
+    let initialPortalState: PortalButtonState = 'generate';
+    if (cached) {
+      this.cachedSplatResult = cached;
+      initialPortalState = 'enter';
+    }
+
+    this.portalUI = createPortalUI(
+      this.world,
+      portalPos.position,
+      portalPos.rotation,
+      this.PORTAL_IMAGE_NAME,
+      initialPortalState,
+    );
 
     // Setup multiplayer callbacks
     this.setupMultiplayerCallbacks();
@@ -193,25 +237,136 @@ class PhotoMuseumApp {
     // Show photo picker UI and load selected photos onto frames
   }
 
-  // public async enterSplatWorld(splatUrl: string): Promise<void> {
-  //   if (!this.gaussianSplatWorld) {
-  //     this.gaussianSplatWorld = new GaussianSplatWorld(
-  //       this.world.renderer,
-  //       this.world.camera,
-  //       this.world.scene
-  //     );
-  //   }
+  private isGenerating = false;
 
-  //   await this.gaussianSplatWorld.loadSplat(splatUrl);
-  //   this.inSplatWorld = true;
-  // }
+  /** Phase 1: Start world generation, show countdown, poll until done. */
+  private async generateSplatWorld(): Promise<void> {
+    if (!this.portalUI || this.isGenerating) return;
+    this.isGenerating = true;
 
-  // public exitSplatWorld(): void {
-  //   if (this.gaussianSplatWorld) {
-  //     this.gaussianSplatWorld.dispose();
-  //   }
-  //   this.inSplatWorld = false;
-  // }
+    try {
+      const genResult = await this.worldLabsService.startGeneration(
+        this.PORTAL_IMAGE_URL,
+        this.PORTAL_IMAGE_NAME,
+      );
+
+      // Server returned cached result directly
+      if ('spzUrl' in genResult) {
+        this.cachedSplatResult = genResult;
+        this.portalUI.setState('enter');
+        this.isGenerating = false;
+        return;
+      }
+
+      // Start countdown timer on the button
+      this.portalUI.startCountdown(genResult.estimatedDurationMs);
+
+      // Poll in background until done
+      const result = await this.worldLabsService.pollUntilDone(
+        genResult.operationId,
+        this.PORTAL_IMAGE_URL,
+      );
+
+      this.cachedSplatResult = result;
+      this.portalUI.setState('enter');
+    } catch (err) {
+      console.error('Failed to generate world:', err);
+      this.portalUI?.setState('generate');
+    } finally {
+      this.isGenerating = false;
+    }
+  }
+
+  /** Phase 2: Load the cached splat and enter the world. */
+  private async enterSplatWorld(): Promise<void> {
+    if (!this.portalUI || !this.cachedSplatResult) return;
+
+    const result = this.cachedSplatResult;
+
+    try {
+      console.log('[SplatWorld] Entering with spzUrl:', result.spzUrl);
+
+      // Hide museum entities (but keep floor for locomotion raycasting —
+      // hiding it makes IWSDK's raycast miss → player falls with gravity).
+      if (this.roomEntity?.object3D) this.roomEntity.object3D.visible = false;
+      for (const entity of this.frameEntities) {
+        if (entity.object3D) entity.object3D.visible = false;
+      }
+      if (this.portalFrame) this.portalFrame.group.visible = false;
+      this.portalUI.dispose();
+      this.portalUI = null;
+
+      // Make floor invisible but keep it raycastable for IWSDK locomotion
+      if (this.floorEntity?.object3D) {
+        const floorMesh = this.floorEntity.object3D as THREE.Mesh;
+        if (floorMesh.material && 'opacity' in floorMesh.material) {
+          (floorMesh.material as THREE.MeshStandardMaterial).transparent = true;
+          (floorMesh.material as THREE.MeshStandardMaterial).opacity = 0;
+        }
+      }
+
+      // Load splat
+      this.gaussianSplatWorld = new GaussianSplatWorld(this.world);
+      await this.gaussianSplatWorld.loadSplat(result.spzUrl);
+
+      console.log('[SplatWorld] Splat loaded successfully');
+
+      // Position player at splat origin
+      const player = (this.world as any).player;
+      if (player?.position) {
+        player.position.set(0, 1.6, 0);
+      }
+
+      // Create boundary guard
+      this.boundaryGuard = createBoundaryGuard(this.world, new THREE.Vector3(0, 0, 0), 5);
+      this.inSplatWorld = true;
+
+    } catch (err) {
+      console.error('[SplatWorld] Failed to enter splat world:', err);
+    }
+  }
+
+  private exitSplatWorld(): void {
+    // Dispose splat + boundary
+    this.gaussianSplatWorld?.dispose();
+    this.gaussianSplatWorld = null;
+    this.boundaryGuard?.dispose();
+    this.boundaryGuard = null;
+
+    // Re-show museum entities
+    if (this.roomEntity?.object3D) this.roomEntity.object3D.visible = true;
+    // Restore floor visibility
+    if (this.floorEntity?.object3D) {
+      const floorMesh = this.floorEntity.object3D as THREE.Mesh;
+      if (floorMesh.material && 'opacity' in floorMesh.material) {
+        (floorMesh.material as THREE.MeshStandardMaterial).transparent = false;
+        (floorMesh.material as THREE.MeshStandardMaterial).opacity = 1;
+      }
+    }
+    for (const entity of this.frameEntities) {
+      if (entity.object3D) entity.object3D.visible = true;
+    }
+    if (this.portalFrame) this.portalFrame.group.visible = true;
+
+    // Re-create portal UI — splat is cached now so go straight to "Enter World"
+    const framePositions = generateFramePositions(18);
+    const portalPos = framePositions[0];
+    this.portalUI = createPortalUI(
+      this.world,
+      portalPos.position,
+      portalPos.rotation,
+      this.PORTAL_IMAGE_NAME,
+      this.cachedSplatResult ? 'enter' : 'generate',
+    );
+
+    // Reposition player in front of portal frame
+    const player = (this.world as any).player;
+    if (player?.position) {
+      player.position.set(portalPos.position.x, 1.6, portalPos.position.z + 2);
+    }
+
+    this.inSplatWorld = false;
+  }
 
   private setupFrameHook(): void {
     // Wrap world.update so our per-frame logic runs inside the IWSDK's
@@ -222,19 +377,48 @@ class PhotoMuseumApp {
       // Run the original IWSDK update first (processes input, ECS systems, etc.)
       originalUpdate(delta, time);
 
-      // Sync local camera pose to other users
       const camera = this.world.camera;
-      this.multiplayer.updatePosition(
-        camera.position,
-        camera.quaternion
-      );
 
-      // Update creative input (drawing & annotations)
-      this.creativeInput?.update(delta, time);
+      if (!this.inSplatWorld) {
+        // ── Gallery mode ──
 
-      // Rotate labels to face the camera on Y-axis only
-      updateAnnotationFacing(camera);
-      updateVoiceNoteFacing(camera);
+        // Sync local camera pose to other users
+        this.multiplayer.updatePosition(camera.position, camera.quaternion);
+
+        // Update creative input (drawing & annotations)
+        this.creativeInput?.update(delta, time);
+
+        // Rotate labels to face the camera on Y-axis only
+        updateAnnotationFacing(camera);
+        updateVoiceNoteFacing(camera);
+
+        // Update portal parallax
+        this.portalFrame?.updateParallax(camera);
+
+        // Update countdown timer if waiting
+        this.portalUI?.updateCountdown();
+
+        // Check portal button press — dispatch based on which state was pressed
+        const pressed = this.portalUI?.checkPress(this.world);
+        if (pressed === 'generate') {
+          this.generateSplatWorld();
+        } else if (pressed === 'enter') {
+          this.enterSplatWorld();
+        }
+      } else {
+        // ── Splat world mode ──
+
+        // Free-fly controls
+        this.gaussianSplatWorld?.update(delta);
+
+        // Boundary guard
+        if (this.boundaryGuard) {
+          this.boundaryGuard.update(this.world);
+          if (this.boundaryGuard.checkReturn(this.world)) {
+            this.exitSplatWorld();
+          }
+        }
+      }
     };
   }
 }

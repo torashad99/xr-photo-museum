@@ -1,12 +1,43 @@
+import path from "path";
 import { optimizeGLTF } from "@iwsdk/vite-plugin-gltf-optimizer";
 import { injectIWER } from "@iwsdk/vite-plugin-iwer";
-
 import { compileUIKit } from "@iwsdk/vite-plugin-uikitml";
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import mkcert from "vite-plugin-mkcert";
+
+const threePkg = path.resolve(__dirname, "node_modules/three");
+
+/**
+ * Redirect IWSDK's bundled super-three imports to the project's single
+ * Three.js instance, preventing duplicate Three.js modules and the
+ * resulting "Can not resolve #include <splatDefines>" shader error from SparkJS.
+ */
+function deduplicateThree(): Plugin {
+  const bundledThreeRe =
+    /node_modules\/@iwsdk\/core\/dist\/node_modules\/\.pnpm\/super-three@[\d.]+\/node_modules\/super-three\/(.*)/;
+
+  return {
+    name: "deduplicate-three",
+    enforce: "pre",
+    resolveId(source, importer) {
+      if (!importer) return null;
+
+      const resolved = source.startsWith(".")
+        ? path.resolve(path.dirname(importer), source)
+        : null;
+      const target = resolved ?? source;
+      const match = target.match(bundledThreeRe);
+      if (match) {
+        return path.join(threePkg, match[1]);
+      }
+      return null;
+    },
+  };
+}
 
 export default defineConfig({
   plugins: [
+    deduplicateThree(),
     mkcert(),
     injectIWER({
       device: "metaQuest3",
@@ -19,6 +50,12 @@ export default defineConfig({
       level: "medium",
     }),
   ],
+  resolve: {
+    alias: {
+      three: threePkg,
+    },
+    dedupe: ["three"],
+  },
   server: {
     host: "0.0.0.0",
     port: 8081,
@@ -27,6 +64,10 @@ export default defineConfig({
       '/socket.io': {
         target: 'http://localhost:3001',
         ws: true,
+        changeOrigin: true
+      },
+      '/api': {
+        target: 'http://localhost:3001',
         changeOrigin: true
       }
     }
