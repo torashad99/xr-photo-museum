@@ -3,17 +3,16 @@ import { World, Entity } from '@iwsdk/core';
 import * as THREE from 'three';
 import { createMuseumRoom } from './components/MuseumRoom';
 import { createPhotoFrame, generateFramePositions, setFramePhoto } from './components/PhotoFrame';
-import { createAnnotation, updateAnnotationFacing } from './components/Annotation';
-import { createVoiceNote, updateVoiceNoteFacing } from './components/VoiceNote';
+import { createAnnotation, updateAnnotationFacing, hideAllAnnotations, showAllAnnotations } from './components/Annotation';
+import { createVoiceNote, updateVoiceNoteFacing, hideAllVoiceNotes, showAllVoiceNotes } from './components/VoiceNote';
 import { GoogleAuthService } from './services/googleAuth';
 import { GooglePhotosService, MediaItem } from './services/photosService'
 import { MultiplayerService, RemoteUser } from './services/MultiplayerService';
 import { CreativeInputSystem } from './components/CreativeInputSystem';
-import { startStroke, addPointToStroke } from './components/Drawing';
+import { startStroke, addPointToStroke, hideAllDrawings, showAllDrawings } from './components/Drawing';
 import { createPortalFrame, PortalFrameHandle } from './components/PortalFrame';
 import { createPortalUI, PortalUIHandle, PortalButtonState } from './components/PortalUI';
 import { GaussianSplatWorld } from './components/GaussianSplatWorld';
-import { createBoundaryGuard, BoundaryGuardHandle } from './components/BoundaryGuard';
 import { WorldLabsService, SplatResult } from './services/WorldLabsService';
 
 class PhotoMuseumApp {
@@ -29,7 +28,6 @@ class PhotoMuseumApp {
   private portalFrame: PortalFrameHandle | null = null;
   private portalUI: PortalUIHandle | null = null;
   private gaussianSplatWorld: GaussianSplatWorld | null = null;
-  private boundaryGuard: BoundaryGuardHandle | null = null;
   private worldLabsService: WorldLabsService = new WorldLabsService();
   private cachedSplatResult: SplatResult | null = null;
 
@@ -286,8 +284,7 @@ class PhotoMuseumApp {
     try {
       console.log('[SplatWorld] Entering with spzUrl:', result.spzUrl);
 
-      // Hide museum entities (but keep floor for locomotion raycasting —
-      // hiding it makes IWSDK's raycast miss → player falls with gravity).
+      // Hide museum entities
       if (this.roomEntity?.object3D) this.roomEntity.object3D.visible = false;
       for (const entity of this.frameEntities) {
         if (entity.object3D) entity.object3D.visible = false;
@@ -305,6 +302,11 @@ class PhotoMuseumApp {
         }
       }
 
+      // Hide all museum drawings, annotations, and voice notes
+      hideAllAnnotations();
+      hideAllVoiceNotes();
+      hideAllDrawings();
+
       // Load splat
       this.gaussianSplatWorld = new GaussianSplatWorld(this.world);
       await this.gaussianSplatWorld.loadSplat(result.spzUrl);
@@ -317,8 +319,6 @@ class PhotoMuseumApp {
         player.position.set(0, 1.6, 0);
       }
 
-      // Create boundary guard
-      this.boundaryGuard = createBoundaryGuard(this.world, new THREE.Vector3(0, 0, 0), 5);
       this.inSplatWorld = true;
 
     } catch (err) {
@@ -327,11 +327,9 @@ class PhotoMuseumApp {
   }
 
   private exitSplatWorld(): void {
-    // Dispose splat + boundary
+    // Dispose splat
     this.gaussianSplatWorld?.dispose();
     this.gaussianSplatWorld = null;
-    this.boundaryGuard?.dispose();
-    this.boundaryGuard = null;
 
     // Re-show museum entities
     if (this.roomEntity?.object3D) this.roomEntity.object3D.visible = true;
@@ -347,6 +345,11 @@ class PhotoMuseumApp {
       if (entity.object3D) entity.object3D.visible = true;
     }
     if (this.portalFrame) this.portalFrame.group.visible = true;
+
+    // Restore museum drawings, annotations, and voice notes
+    showAllAnnotations();
+    showAllVoiceNotes();
+    showAllDrawings();
 
     // Re-create portal UI — splat is cached now so go straight to "Enter World"
     const framePositions = generateFramePositions(18);
@@ -373,9 +376,34 @@ class PhotoMuseumApp {
     // setAnimationLoop callback — which uses XRSession.requestAnimationFrame
     // in WebXR and therefore keeps firing on Quest Browser.
     const originalUpdate = this.world.update.bind(this.world);
+    let controllerDiagDone = false;
     this.world.update = (delta: number, time: number) => {
       // Run the original IWSDK update first (processes input, ECS systems, etc.)
       originalUpdate(delta, time);
+
+      // One-time diagnostic: log controller visual adapter state
+      if (!controllerDiagDone && this.world.input?.gamepads?.left) {
+        controllerDiagDone = true;
+        const adapters = (this.world.input as any).visualAdapters;
+        if (adapters?.controller) {
+          const left = adapters.controller.left;
+          const right = adapters.controller.right;
+          console.log('[ControllerDiag] left:', {
+            connected: left?.connected,
+            hasVisual: !!left?.visual,
+            isPrimary: left?.isPrimary,
+            modelVisible: left?.visual?.model?.visible,
+          });
+          console.log('[ControllerDiag] right:', {
+            connected: right?.connected,
+            hasVisual: !!right?.visual,
+            isPrimary: right?.isPrimary,
+            modelVisible: right?.visual?.model?.visible,
+          });
+        } else {
+          console.log('[ControllerDiag] No controller visual adapters found');
+        }
+      }
 
       const camera = this.world.camera;
 
@@ -408,15 +436,12 @@ class PhotoMuseumApp {
       } else {
         // ── Splat world mode ──
 
-        // Free-fly controls
+        // Free-fly controls + force position (overrides IWSDK locomotion)
         this.gaussianSplatWorld?.update(delta);
 
-        // Boundary guard
-        if (this.boundaryGuard) {
-          this.boundaryGuard.update(this.world);
-          if (this.boundaryGuard.checkReturn(this.world)) {
-            this.exitSplatWorld();
-          }
+        // Y button on left controller → return to gallery
+        if (this.gaussianSplatWorld?.checkMenuPress()) {
+          this.exitSplatWorld();
         }
       }
     };

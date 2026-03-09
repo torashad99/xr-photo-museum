@@ -6,8 +6,9 @@ export const VoiceNoteComponent = createComponent('VoiceNote', {
     authorId: { type: Types.String, default: '' },
 });
 
-// Track all voice note labels for Y-axis billboard facing
+// Track all voice note labels and groups for Y-axis billboard facing and hide/show
 const voiceNoteLabels: Set<THREE.Mesh> = new Set();
+const voiceNoteGroups: Set<THREE.Group> = new Set();
 
 export function createVoiceNote(
     world: World,
@@ -63,6 +64,7 @@ export function createVoiceNote(
     group.add(label);
 
     voiceNoteLabels.add(label);
+    voiceNoteGroups.add(group);
 
     group.position.copy(position);
 
@@ -114,5 +116,17 @@ export function updateVoiceNoteFacing(camera: THREE.Camera): void {
         const dx = _camWorld.x - _labelWorld.x;
         const dz = _camWorld.z - _labelWorld.z;
         label.rotation.set(0, Math.atan2(dx, dz), 0);
+    }
+}
+
+export function hideAllVoiceNotes(): void {
+    for (const group of voiceNoteGroups) {
+        if (group.parent) group.visible = false;
+    }
+}
+
+export function showAllVoiceNotes(): void {
+    for (const group of voiceNoteGroups) {
+        if (group.parent) group.visible = true;
     }
 }

@@ -8,8 +8,9 @@ export const Annotation = createComponent('Annotation', {
   timestamp: { type: Types.String, default: '0' },
 });
 
-// Track all annotation label meshes for per-frame Y-axis facing
+// Track all annotation groups for per-frame Y-axis facing and hide/show
 const annotationLabels: Set<THREE.Mesh> = new Set();
+const annotationGroups: Set<THREE.Group> = new Set();
 
 export function createAnnotation(
   world: World,
@@ -57,6 +58,7 @@ export function createAnnotation(
   group.add(label);
 
   annotationLabels.add(label);
+  annotationGroups.add(group);
 
   group.position.copy(position);
 
@@ -94,5 +96,17 @@ export function updateAnnotationFacing(camera: THREE.Camera): void {
     // PlaneGeometry faces +Z by default; atan2(dx, dz) gives the Y rotation
     // needed to point the plane's +Z toward the camera.
     label.rotation.set(0, Math.atan2(dx, dz), 0);
+  }
+}
+
+export function hideAllAnnotations(): void {
+  for (const group of annotationGroups) {
+    if (group.parent) group.visible = false;
+  }
+}
+
+export function showAllAnnotations(): void {
+  for (const group of annotationGroups) {
+    if (group.parent) group.visible = true;
   }
 }
