@@ -1,5 +1,6 @@
 // src/index.ts
 import { World, Entity } from '@iwsdk/core';
+import { XRInputVisualAdapter, AnimatedController } from '@iwsdk/xr-input';
 import * as THREE from 'three';
 import { createMuseumRoom } from './components/MuseumRoom';
 import { createPhotoFrame, generateFramePositions, setFramePhoto } from './components/PhotoFrame';
@@ -56,6 +57,8 @@ class PhotoMuseumApp {
     // so the auto-offered session includes mic access. Quest Browser blocks
     // SpeechRecognition / getUserMedia during immersive sessions without it.
     injectXRMicrophoneFeature();
+    patchControllerVisualLoading();
+    patchAnimatedControllerInit();
 
     this.world = await World.create(container, { features: { locomotion: true } });
 
@@ -376,34 +379,9 @@ class PhotoMuseumApp {
     // setAnimationLoop callback — which uses XRSession.requestAnimationFrame
     // in WebXR and therefore keeps firing on Quest Browser.
     const originalUpdate = this.world.update.bind(this.world);
-    let controllerDiagDone = false;
     this.world.update = (delta: number, time: number) => {
       // Run the original IWSDK update first (processes input, ECS systems, etc.)
       originalUpdate(delta, time);
-
-      // One-time diagnostic: log controller visual adapter state
-      if (!controllerDiagDone && this.world.input?.gamepads?.left) {
-        controllerDiagDone = true;
-        const adapters = (this.world.input as any).visualAdapters;
-        if (adapters?.controller) {
-          const left = adapters.controller.left;
-          const right = adapters.controller.right;
-          console.log('[ControllerDiag] left:', {
-            connected: left?.connected,
-            hasVisual: !!left?.visual,
-            isPrimary: left?.isPrimary,
-            modelVisible: left?.visual?.model?.visible,
-          });
-          console.log('[ControllerDiag] right:', {
-            connected: right?.connected,
-            hasVisual: !!right?.visual,
-            isPrimary: right?.isPrimary,
-            modelVisible: right?.visual?.model?.visible,
-          });
-        } else {
-          console.log('[ControllerDiag] No controller visual adapters found');
-        }
-      }
 
       const camera = this.world.camera;
 
@@ -446,6 +424,60 @@ class PhotoMuseumApp {
       }
     };
   }
+}
+
+/**
+ * Monkey-patch XRInputVisualAdapter.prototype.connectVisual to add error
+ * handling (the original has no .catch()) and disable frustum culling on
+ * loaded controller meshes (r181 ArrayCamera culling fix).
+ */
+function patchControllerVisualLoading(): void {
+  (XRInputVisualAdapter.prototype as any).connectVisual = function (this: any) {
+    if (!this.inputConfig) return;
+    const { inputSource, layout } = this.inputConfig;
+    (XRInputVisualAdapter as any)
+      .createVisual(
+        this.visualClass, inputSource, layout,
+        this.visualsEnabled, this.scene, this.camera, this.assetLoader,
+      )
+      .then((visual: any) => {
+        if (
+          visual &&
+          inputSource === this._inputSource &&
+          visual.constructor === this.visualClass
+        ) {
+          this.visual = visual;
+          this.visual.xrInput = this;
+          this.playerSpace.add(visual.model);
+
+          // Disable frustum culling on all meshes (fixes r181 ArrayCamera culling)
+          visual.model.traverse((child: any) => {
+            if (child.isMesh) child.frustumCulled = false;
+            if (child.isBatchedMesh) child.perObjectFrustumCulled = false;
+          });
+        }
+      })
+      .catch((err: any) => {
+        console.warn('Controller visual loading failed:', err);
+      });
+  };
+}
+
+/**
+ * Monkey-patch AnimatedController.prototype.init to skip FlexBatchedMesh
+ * conversion entirely. On Quest Browser with WebXR multiview, BatchedMesh
+ * triggers GL_ANGLE_multi_draw which conflicts with GL_OVR_multiview
+ * extension ordering in GLSL ES 3.0 shaders, causing all controller
+ * materials to fail compilation. Keeping raw GLTF meshes avoids this.
+ * Trade-off: no button press animations, but controllers are visible.
+ */
+function patchAnimatedControllerInit(): void {
+  (AnimatedController.prototype as any).init = function (this: any) {
+    // Skip origInit entirely (FlexBatchedMesh creation) — just fix raw meshes
+    this.model.traverse((child: any) => {
+      if (child.isMesh) child.frustumCulled = false;
+    });
+  };
 }
 
 /**
