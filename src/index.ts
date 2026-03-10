@@ -316,10 +316,10 @@ class PhotoMuseumApp {
 
       console.log('[SplatWorld] Splat loaded successfully');
 
-      // Position player at splat origin
-      const player = (this.world as any).player;
-      if (player?.position) {
-        player.position.set(0, 1.6, 0);
+      // Position player at splat origin via locomotor.teleport()
+      const locomotor = this.getLocomotor();
+      if (locomotor) {
+        locomotor.teleport(new THREE.Vector3(0, 1.6, 0));
       }
 
       this.inSplatWorld = true;
@@ -365,13 +365,30 @@ class PhotoMuseumApp {
       this.cachedSplatResult ? 'enter' : 'generate',
     );
 
-    // Reposition player in front of portal frame
-    const player = (this.world as any).player;
-    if (player?.position) {
-      player.position.set(portalPos.position.x, 1.6, portalPos.position.z + 2);
+    // Reposition player in front of portal frame via locomotor.teleport()
+    // so the locomotor's internal state is updated (prevents it from
+    // overwriting player.position on the next frame).
+    const locomotor = this.getLocomotor();
+    if (locomotor) {
+      locomotor.teleport(new THREE.Vector3(portalPos.position.x, 1.6, portalPos.position.z + 2));
+    } else {
+      // Fallback if locomotor not found
+      const player = (this.world as any).player;
+      if (player?.position) player.position.set(portalPos.position.x, 1.6, portalPos.position.z + 2);
     }
 
     this.inSplatWorld = false;
+  }
+
+  /** Access IWSDK's internal locomotor for programmatic teleport. */
+  private getLocomotor(): any {
+    const systems = (this.world as any)._systems || (this.world as any).systems;
+    if (systems) {
+      for (const sys of systems) {
+        if (sys.locomotor) return sys.locomotor;
+      }
+    }
+    return null;
   }
 
   private setupFrameHook(): void {
