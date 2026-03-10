@@ -96,10 +96,23 @@ export class GaussianSplatWorld {
     this.splatMesh.renderOrder = -10;
     this.world.scene.add(this.splatMesh);
 
-    // Initialize fly position from player
-    const player = (this.world as any).player;
-    if (player?.position) {
-      this.flyPosition.copy(player.position);
+    // Compute world-space bounding box of the loaded splat to determine
+    // a good initial viewing position (instead of hardcoded origin).
+    this.splatMesh.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(this.splatMesh);
+    const center = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3());
+
+    if (box.isEmpty() || size.length() < 0.01) {
+      // Fallback: splat has no computable bounds (SparkJS SplatMesh may not
+      // expose geometry). Place player at scene origin with a small offset.
+      this.flyPosition.set(0, 1.6, 2);
+      console.log('[SparkJS] Bounding box empty, using fallback position');
+    } else {
+      const radius = size.length() / 2;
+      const pullback = Math.max(radius * 0.5, 1.0);
+      this.flyPosition.set(center.x, center.y, center.z + pullback);
+      console.log(`[SparkJS] Splat bounds center: (${center.x.toFixed(2)}, ${center.y.toFixed(2)}, ${center.z.toFixed(2)}), radius: ${radius.toFixed(2)}, pullback: ${pullback.toFixed(2)}`);
     }
 
     console.log('[SparkJS] SplatMesh added to scene, rotated 180° on X, scaled 1.5x');
