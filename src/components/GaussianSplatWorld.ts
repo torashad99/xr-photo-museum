@@ -24,6 +24,19 @@ export class GaussianSplatWorld {
   private _up = new THREE.Vector3(0, 1, 0);
   private _thumbstick = new THREE.Vector2();
 
+  // Dual-grip zoom state (Open Brush style)
+  private currentScale = 1.5;
+  private isGrabbing = false;
+  private grabStartDistance = 0;
+  private grabStartScale = 0;
+  private grabStartSplatPos = new THREE.Vector3();
+  private grabStartPlayerPos = new THREE.Vector3();
+  private readonly MIN_SCALE = 0.3;
+  private readonly MAX_SCALE = 15.0;
+  private _leftPos = new THREE.Vector3();
+  private _rightPos = new THREE.Vector3();
+  private _pivotOffset = new THREE.Vector3();
+
   constructor(world: World) {
     this.world = world;
   }
@@ -169,6 +182,54 @@ export class GaussianSplatWorld {
         this.flyPosition.addScaledVector(this._forward, -moveY * speed);
         this.flyPosition.y += moveVertical * speed;
       }
+    }
+
+    // Dual-trigger zoom: hold both triggers, move controllers
+    // apart to zoom in (scale up splat), together to zoom out.
+    if (leftGamepad && rightGamepad && this.splatMesh) {
+      const leftGripBtn = leftGamepad.getButtonPressed(InputComponent.Squeeze);
+      const rightGripBtn = rightGamepad.getButtonPressed(InputComponent.Squeeze);
+
+      if (leftGripBtn && rightGripBtn) {
+        // Get controller world positions from xrOrigin grip spaces
+        // (updated each frame from XRFrame.getPose in the input manager)
+        const xrOrigin = (this.world.input as any).xrOrigin;
+        const leftGrip = xrOrigin?.gripSpaces?.left;
+        const rightGrip = xrOrigin?.gripSpaces?.right;
+
+        if (leftGrip && rightGrip) {
+          leftGrip.getWorldPosition(this._leftPos);
+          rightGrip.getWorldPosition(this._rightPos);
+          const dist = this._leftPos.distanceTo(this._rightPos);
+
+          if (!this.isGrabbing) {
+            this.isGrabbing = true;
+            this.grabStartDistance = dist;
+            this.grabStartScale = this.currentScale;
+            this.grabStartSplatPos.copy(this.splatMesh.position);
+            this.grabStartPlayerPos.copy(this.flyPosition);
+            console.log(`[Zoom] Grab started, dist: ${dist.toFixed(3)}, scale: ${this.currentScale.toFixed(2)}`);
+          } else if (this.grabStartDistance > 0.05) {
+            const ratio = dist / this.grabStartDistance;
+            const newScale = THREE.MathUtils.clamp(
+              this.grabStartScale * ratio,
+              this.MIN_SCALE,
+              this.MAX_SCALE,
+            );
+
+            // Scale splat around the player position as pivot
+            const scaleFactor = newScale / this.grabStartScale;
+            this._pivotOffset.subVectors(this.grabStartSplatPos, this.grabStartPlayerPos);
+            this.splatMesh.position.copy(this.flyPosition).addScaledVector(this._pivotOffset, scaleFactor);
+            this.splatMesh.scale.setScalar(newScale);
+            this.currentScale = newScale;
+          }
+        }
+      } else {
+        this.isGrabbing = false;
+      }
+    } else {
+      this.isGrabbing = false;
     }
 
     // Force our fly position onto the player every frame.
