@@ -9,6 +9,10 @@
         "--client-version",
         "0.3.0"
       ]
+    },
+    "meta-horizon-mcp": {
+      "command": "npx",
+      "args": ["-y", "@meta-quest/hzdb", "mcp", "server"]
     }
   }
 }

@@ -14,7 +14,9 @@
       "Bash(npm install:*)",
       "Bash(npm view:*)",
       "Bash(npm search:*)",
-      "Bash(npm list:*)"
+      "Bash(npm list:*)",
+      "mcp__meta-horizon-mcp__fetch_meta_quest_doc",
+      "mcp__meta-horizon-mcp__search_docs"
     ]
   },
   "enabledMcpjsonServers": [
