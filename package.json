@@ -11,7 +11,7 @@
     "start": "tsx server/index.ts"
   },
   "dependencies": {
-    "@iwsdk/core": "0.2.2",
+    "@iwsdk/core": "0.3.0",
     "@sparkjsdev/spark": "github:sparkjsdev/spark#v2.0.0-preview",
     "dotenv": "^17.3.1",
     "express": "^5.1.0",
@@ -22,9 +22,9 @@
     "uuid": "^13.0.0"
   },
   "devDependencies": {
-    "@iwsdk/vite-plugin-gltf-optimizer": "0.2.2",
-    "@iwsdk/vite-plugin-iwer": "0.2.2",
-    "@iwsdk/vite-plugin-uikitml": "0.2.2",
+    "@iwsdk/vite-plugin-dev": "0.3.0",
+    "@iwsdk/vite-plugin-gltf-optimizer": "0.3.0",
+    "@iwsdk/vite-plugin-uikitml": "0.3.0",
     "@types/express": "^5.0.5",
     "@types/three": "^0.181.0",
     "@types/uuid": "^10.0.0",

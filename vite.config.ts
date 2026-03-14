@@ -1,6 +1,6 @@
 import path from "path";
 import { optimizeGLTF } from "@iwsdk/vite-plugin-gltf-optimizer";
-import { injectIWER } from "@iwsdk/vite-plugin-iwer";
+import { iwsdkDev } from "@iwsdk/vite-plugin-dev";
 import { compileUIKit } from "@iwsdk/vite-plugin-uikitml";
 import { defineConfig, type Plugin } from "vite";
 import mkcert from "vite-plugin-mkcert";
@@ -39,9 +39,11 @@ export default defineConfig({
   plugins: [
     deduplicateThree(),
     mkcert(),
-    injectIWER({
-      device: "metaQuest3",
-      activation: "localhost",
+    iwsdkDev({
+      emulator: {
+        device: "metaQuest3",
+        activation: "localhost",
+      },
       verbose: true,
     }),
 
