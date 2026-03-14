@@ -15,6 +15,7 @@ import { createPortalFrame, PortalFrameHandle } from './components/PortalFrame';
 import { createPortalUI, PortalUIHandle, PortalButtonState } from './components/PortalUI';
 import { GaussianSplatWorld } from './components/GaussianSplatWorld';
 import { WorldLabsService, SplatResult } from './services/WorldLabsService';
+import { FlatModeOverlay, FlatModeInput } from './components/FlatModeOverlay';
 
 class PhotoMuseumApp {
   private world!: World;
@@ -37,6 +38,14 @@ class PhotoMuseumApp {
   private floorEntity: Entity | null = null;
   private frameEntities: Entity[] = [];
 
+  // Flat mode (mobile fallback)
+  private flatMode: FlatModeOverlay | null = null;
+  private flatYaw = 0;
+  private flatPitch = 0;
+  private flatPosition = new THREE.Vector3(0, 1.6, 0);
+  private _flatRaycaster = new THREE.Raycaster();
+  private _screenCenter = new THREE.Vector2(0, 0);
+
   // Hardcoded portal image (for debugging)
   private readonly PORTAL_IMAGE_URL = '/portal-image.jpg';
   private readonly PORTAL_IMAGE_NAME = 'Portal World';
@@ -46,7 +55,7 @@ class PhotoMuseumApp {
     this.googleAuth = new GoogleAuthService();
     this.multiplayer = new MultiplayerService();
 
-    this.init();
+    this.init().catch(err => console.error('[Init] Fatal error during initialization:', err));
   }
 
   private async init(): Promise<void> {
@@ -60,7 +69,16 @@ class PhotoMuseumApp {
     patchControllerVisualLoading();
     patchAnimatedControllerInit();
 
-    this.world = await World.create(container, { features: { locomotion: true } });
+    // Detect flat mode BEFORE World.create() so we can disable XR session
+    // auto-offer — phones hang when IWSDK tries to offer a session they can't support.
+    const isFlatMode = await this.detectFlatMode();
+    console.log('[Init] Flat mode detected:', isFlatMode, '| hostname:', location.hostname, '| navigator.xr:', !!navigator.xr);
+
+    this.world = await World.create(container, {
+      features: { locomotion: true },
+      ...(isFlatMode ? { xr: { offer: 'none' as any } } : {}),
+    });
+    console.log('[Init] World created successfully');
 
     // Check for OAuth callback
     if (window.location.hash.includes('access_token')) {
@@ -127,11 +145,60 @@ class PhotoMuseumApp {
 
     this.creativeInput = new CreativeInputSystem(this.world, this.multiplayer);
 
+    // Setup flat mode overlay (detection already ran above before World.create)
+    console.log('[Init] Setting up flat mode overlay, isFlatMode:', isFlatMode);
+    if (isFlatMode) {
+      const overlayContainer = document.getElementById('flat-mode-overlay');
+      console.log('[Init] Overlay container found:', !!overlayContainer);
+      if (overlayContainer) {
+        this.flatMode = new FlatModeOverlay(overlayContainer);
+        // Prevent browser gestures on the 3D canvas
+        container.style.touchAction = 'none';
+        // Initialize flat position from player rig
+        const player = (this.world as any).player;
+        if (player?.position) {
+          this.flatPosition.copy(player.position);
+        }
+        console.log('[FlatMode] Detected — showing entry screen');
+        // Show entry splash; controls hidden until user taps "Enter"
+        this.flatMode.showEntryScreen().then(() => {
+          console.log('[FlatMode] User entered — touch controls active');
+        });
+      }
+    }
+
     // Hook into the IWSDK's existing render loop (which uses setAnimationLoop
     // and correctly switches to XRSession.requestAnimationFrame in WebXR).
     // Do NOT use a separate requestAnimationFrame loop — it stops firing
     // once an XR session is active on Quest Browser.
     this.setupFrameHook();
+  }
+
+  private async detectFlatMode(): Promise<boolean> {
+    // IWER handles localhost — never activate flat mode there
+    const host = location.hostname;
+    if (host === 'localhost' || host === '127.0.0.1') return false;
+
+    // No WebXR API at all (e.g. iOS Safari)
+    if (!navigator.xr) return true;
+
+    // Android Chrome reports isSessionSupported('immersive-vr') === true for
+    // Cardboard-style WebXR even on phones without a headset. Detect mobile
+    // phones/tablets and force flat mode — we only want real headset sessions
+    // (Quest Browser), which don't have a mobile user agent.
+    const ua = navigator.userAgent;
+    if (/Android|iPhone|iPad|iPod|Mobile|Tablet/i.test(ua)) {
+      // Quest Browser UA contains "OculusBrowser" — allow XR for that
+      if (!/OculusBrowser/i.test(ua)) return true;
+    }
+
+    // WebXR API exists but immersive-vr not supported
+    try {
+      const supported = await navigator.xr.isSessionSupported('immersive-vr');
+      return !supported;
+    } catch {
+      return true;
+    }
   }
 
   private setupMultiplayerCallbacks(): void {
@@ -324,6 +391,9 @@ class PhotoMuseumApp {
 
       this.inSplatWorld = true;
 
+      // Show "Return to Museum" button in flat mode
+      this.flatMode?.setReturnButtonVisible(true);
+
     } catch (err) {
       console.error('[SplatWorld] Failed to enter splat world:', err);
     }
@@ -378,6 +448,16 @@ class PhotoMuseumApp {
     }
 
     this.inSplatWorld = false;
+
+    // Hide "Return to Museum" button in flat mode
+    this.flatMode?.setReturnButtonVisible(false);
+
+    // Reset flat mode position to in front of portal
+    if (this.flatMode) {
+      const fps = generateFramePositions(18);
+      const pp = fps[0];
+      this.flatPosition.set(pp.position.x, 1.6, pp.position.z + 2);
+    }
   }
 
   /** Access IWSDK's internal locomotor for programmatic teleport. */
@@ -391,6 +471,53 @@ class PhotoMuseumApp {
     return null;
   }
 
+  // ── Flat mode: camera rotation ──
+  private applyFlatModeCamera(input: FlatModeInput, delta: number): void {
+    const sensitivity = 2.0; // rad/s at full deflection
+    this.flatYaw -= input.rightStick.x * sensitivity * delta;
+
+    if (!this.inSplatWorld) {
+      // Gallery: right stick Y = pitch (look up/down)
+      this.flatPitch -= input.rightStick.y * sensitivity * delta;
+      this.flatPitch = THREE.MathUtils.clamp(this.flatPitch, -Math.PI / 3, Math.PI / 3);
+    }
+    // In splat world, right stick Y is vertical fly (handled by GaussianSplatWorld)
+
+    // Yaw on the player rig, pitch on the camera
+    const player = (this.world as any).player;
+    if (player?.quaternion) {
+      player.quaternion.setFromEuler(new THREE.Euler(0, this.flatYaw, 0));
+    }
+    this.world.camera.rotation.x = this.flatPitch;
+  }
+
+  // ── Flat mode: gallery movement ──
+  private applyFlatModeMovement(input: FlatModeInput, delta: number): void {
+    const speed = 3.0; // m/s
+    const deadZone = 0.15;
+
+    let mx = Math.abs(input.leftStick.x) > deadZone ? input.leftStick.x : 0;
+    let my = Math.abs(input.leftStick.y) > deadZone ? input.leftStick.y : 0;
+
+    if (mx !== 0 || my !== 0) {
+      const fwd = new THREE.Vector3(-Math.sin(this.flatYaw), 0, -Math.cos(this.flatYaw));
+      const right = new THREE.Vector3(Math.cos(this.flatYaw), 0, -Math.sin(this.flatYaw));
+
+      this.flatPosition.addScaledVector(right, mx * speed * delta);
+      this.flatPosition.addScaledVector(fwd, -my * speed * delta);
+
+      // Clamp to museum walls (20×20 room, walls at ±10)
+      this.flatPosition.x = THREE.MathUtils.clamp(this.flatPosition.x, -9.5, 9.5);
+      this.flatPosition.z = THREE.MathUtils.clamp(this.flatPosition.z, -9.5, 9.5);
+      this.flatPosition.y = 1.6; // Eye height, floor-locked
+    }
+
+    const player = (this.world as any).player;
+    if (player?.position) {
+      player.position.copy(this.flatPosition);
+    }
+  }
+
   private setupFrameHook(): void {
     // Wrap world.update so our per-frame logic runs inside the IWSDK's
     // setAnimationLoop callback — which uses XRSession.requestAnimationFrame
@@ -402,41 +529,77 @@ class PhotoMuseumApp {
 
       const camera = this.world.camera;
 
-      if (!this.inSplatWorld) {
-        // ── Gallery mode ──
+      // ── Flat mode: camera + movement (runs in both gallery and splat) ──
+      if (this.flatMode) {
+        const flatInput = this.flatMode.getInput();
 
-        // Sync local camera pose to other users
-        this.multiplayer.updatePosition(camera.position, camera.quaternion);
+        this.applyFlatModeCamera(flatInput, delta);
 
-        // Update creative input (drawing & annotations)
-        this.creativeInput?.update(delta, time);
+        if (!this.inSplatWorld) {
+          // Gallery: flat mode movement
+          this.applyFlatModeMovement(flatInput, delta);
+        } else {
+          // Splat world: feed virtual sticks to GaussianSplatWorld
+          this.gaussianSplatWorld?.setFlatInput(flatInput.leftStick, flatInput.rightStick.y);
 
-        // Rotate labels to face the camera on Y-axis only
-        updateAnnotationFacing(camera);
-        updateVoiceNoteFacing(camera);
+          // Return to Museum button
+          if (flatInput.returnPressed) {
+            this.exitSplatWorld();
+          }
+        }
 
-        // Update portal parallax
-        this.portalFrame?.updateParallax(camera);
+        // ── Common frame logic (shared between flat and XR) ──
+        if (!this.inSplatWorld) {
+          this.multiplayer.updatePosition(camera.position, camera.quaternion);
+          updateAnnotationFacing(camera);
+          updateVoiceNoteFacing(camera);
+          this.portalFrame?.updateParallax(camera);
+          this.portalUI?.updateCountdown();
 
-        // Update countdown timer if waiting
-        this.portalUI?.updateCountdown();
+          // Raycast interaction: reticle → tap anywhere
+          this._flatRaycaster.setFromCamera(this._screenCenter, camera);
 
-        // Check portal button press — dispatch based on which state was pressed
-        const pressed = this.portalUI?.checkPress(this.world);
-        if (pressed === 'generate') {
-          this.generateSplatWorld();
-        } else if (pressed === 'enter') {
-          this.enterSplatWorld();
+          // Reticle hover feedback
+          const buttonMesh = this.portalUI?.getButtonMesh();
+          if (buttonMesh) {
+            const hits = this._flatRaycaster.intersectObject(buttonMesh);
+            this.flatMode.setReticleActive(hits.length > 0);
+          } else {
+            this.flatMode.setReticleActive(false);
+          }
+
+          const pressed = this.portalUI?.checkRaycastPress(this._flatRaycaster, flatInput.interactPressed);
+          if (pressed === 'generate') {
+            this.generateSplatWorld();
+          } else if (pressed === 'enter') {
+            this.enterSplatWorld();
+          }
+        } else {
+          // Splat world: free-fly + flat input already fed above
+          this.gaussianSplatWorld?.update(delta);
         }
       } else {
-        // ── Splat world mode ──
+        // ── XR mode (original behavior) ──
+        if (!this.inSplatWorld) {
+          this.multiplayer.updatePosition(camera.position, camera.quaternion);
+          this.creativeInput?.update(delta, time);
+          updateAnnotationFacing(camera);
+          updateVoiceNoteFacing(camera);
+          this.portalFrame?.updateParallax(camera);
+          this.portalUI?.updateCountdown();
 
-        // Free-fly controls + force position (overrides IWSDK locomotion)
-        this.gaussianSplatWorld?.update(delta);
+          const pressed = this.portalUI?.checkPress(this.world);
+          if (pressed === 'generate') {
+            this.generateSplatWorld();
+          } else if (pressed === 'enter') {
+            this.enterSplatWorld();
+          }
+        } else {
+          this.gaussianSplatWorld?.update(delta);
 
-        // Y button on left controller → return to gallery
-        if (this.gaussianSplatWorld?.checkMenuPress()) {
-          this.exitSplatWorld();
+          if (this.gaussianSplatWorld?.checkMenuPress()) {
+            this.exitSplatWorld();
+          }
         }
       }
     };

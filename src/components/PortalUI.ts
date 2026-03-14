@@ -6,6 +6,8 @@ export type PortalButtonState = 'generate' | 'waiting' | 'enter';
 
 export interface PortalUIHandle {
   checkPress(world: World): PortalButtonState | null;
+  checkRaycastPress(raycaster: THREE.Raycaster, interactDown: boolean): PortalButtonState | null;
+  getButtonMesh(): THREE.Mesh;
   setState(state: PortalButtonState): void;
   startCountdown(durationMs: number): void;
   updateCountdown(): void;
@@ -206,6 +208,38 @@ export function createPortalUI(
     return state;
   }
 
+  /** Raycast-based press check for flat mode (reticle + tap-to-interact). */
+  function checkRaycastPress(raycaster: THREE.Raycaster, interactDown: boolean): PortalButtonState | null {
+    if (state === 'waiting') return null;
+
+    const intersects = raycaster.intersectObject(buttonMesh);
+    const isHit = intersects.length > 0;
+
+    // Hover feedback
+    if (isHit && !isHovered) {
+      isHovered = true;
+      drawButton(STATE_LABELS[state], STATE_COLORS[state].hover);
+    } else if (!isHit && isHovered) {
+      isHovered = false;
+      drawButton(STATE_LABELS[state], STATE_COLORS[state].normal);
+    }
+
+    // Press on tap while aimed at button
+    if (isHit && interactDown && !pressedLastFrame) {
+      pressedLastFrame = true;
+      drawButton(STATE_LABELS[state], STATE_COLORS[state].press);
+      return state;
+    }
+    if (!isHit || !interactDown) {
+      pressedLastFrame = false;
+    }
+    return null;
+  }
+
+  function getButtonMesh(): THREE.Mesh {
+    return buttonMesh;
+  }
+
   function dispose() {
     world.scene.remove(uiGroup);
     buttonGeometry.dispose();
@@ -216,5 +250,5 @@ export function createPortalUI(
     (nameMesh.material as THREE.Material).dispose();
   }
 
-  return { checkPress, setState, startCountdown, updateCountdown, getState, dispose };
+  return { checkPress, checkRaycastPress, getButtonMesh, setState, startCountdown, updateCountdown, getState, dispose };
 }

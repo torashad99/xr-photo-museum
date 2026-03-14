@@ -1,0 +1,246 @@
+/* Flat Mode — Mobile touch controller overlay
+   Glassmorphism / liquid-glass style, responsive for phone + tablet, portrait + landscape */
+
+#flat-mode-overlay {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1000;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* ── Full-screen tap zone (behind joysticks, captures interact taps) ── */
+.flat-tap-zone {
+  position: absolute;
+  inset: 0;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+/* ── Joysticks ── */
+.flat-joystick {
+  position: absolute;
+  width: clamp(100px, 25vmin, 160px);
+  height: clamp(100px, 25vmin, 160px);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.10);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1.5px solid rgba(255, 255, 255, 0.22);
+  box-shadow:
+    0 4px 30px rgba(0, 0, 0, 0.08),
+    inset 0 0 20px rgba(255, 255, 255, 0.04);
+  pointer-events: auto;
+  touch-action: none;
+  z-index: 1010;
+}
+
+.flat-joystick-left {
+  bottom: calc(max(20px, env(safe-area-inset-bottom, 0px)) + 20px);
+  left: calc(max(20px, env(safe-area-inset-left, 0px)) + 20px);
+}
+
+.flat-joystick-right {
+  bottom: calc(max(20px, env(safe-area-inset-bottom, 0px)) + 20px);
+  right: calc(max(20px, env(safe-area-inset-right, 0px)) + 20px);
+}
+
+.flat-joystick-knob {
+  position: absolute;
+  width: 40%;
+  height: 40%;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.30);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.10);
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  transition: background 0.12s ease;
+  pointer-events: none;
+}
+
+.flat-joystick-knob.active {
+  background: rgba(255, 255, 255, 0.50);
+  border-color: rgba(255, 255, 255, 0.55);
+}
+
+/* ── Reticle (center crosshair) ── */
+.flat-reticle {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 28px;
+  height: 28px;
+  pointer-events: none;
+  z-index: 1005;
+  opacity: 0.6;
+  transition: opacity 0.15s ease;
+}
+
+.flat-reticle.active {
+  opacity: 1.0;
+}
+
+/* Crosshair lines */
+.flat-reticle::before,
+.flat-reticle::after {
+  content: '';
+  position: absolute;
+  background: rgba(255, 255, 255, 0.8);
+  border-radius: 1px;
+}
+
+.flat-reticle::before {
+  width: 2px;
+  height: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.flat-reticle::after {
+  height: 2px;
+  width: 100%;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+/* Center dot */
+.flat-reticle-dot {
+  position: absolute;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.9);
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.flat-reticle.active .flat-reticle-dot {
+  background: rgba(130, 255, 180, 0.95);
+  box-shadow: 0 0 6px rgba(130, 255, 180, 0.5);
+}
+
+/* ── Return to Museum button ── */
+.flat-return-btn {
+  position: absolute;
+  top: calc(max(20px, env(safe-area-inset-top, 0px)) + 16px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: clamp(10px, 2.5vmin, 16px) clamp(20px, 5vmin, 32px);
+  border-radius: 20px;
+  background: rgba(180, 40, 40, 0.25);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1.5px solid rgba(255, 100, 100, 0.35);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  color: rgba(255, 255, 255, 0.9);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: clamp(12px, 3.5vmin, 16px);
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  pointer-events: auto;
+  touch-action: none;
+  display: none;
+  z-index: 1010;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.flat-return-btn.visible {
+  display: block;
+}
+
+.flat-return-btn:active {
+  background: rgba(220, 60, 60, 0.4);
+  border-color: rgba(255, 130, 130, 0.5);
+}
+
+/* ── Entry splash screen ── */
+.flat-entry-splash {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  pointer-events: auto;
+  touch-action: none;
+  z-index: 1050;
+  gap: clamp(16px, 4vmin, 32px);
+}
+
+.flat-entry-title {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: clamp(22px, 6vmin, 36px);
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.95);
+  letter-spacing: 0.5px;
+  text-align: center;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
+}
+
+.flat-entry-subtitle {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: clamp(12px, 3vmin, 16px);
+  color: rgba(255, 255, 255, 0.55);
+  text-align: center;
+  max-width: 280px;
+}
+
+.flat-entry-btn {
+  padding: clamp(14px, 3.5vmin, 22px) clamp(36px, 9vmin, 56px);
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.14);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1.5px solid rgba(255, 255, 255, 0.30);
+  box-shadow:
+    0 4px 30px rgba(0, 0, 0, 0.12),
+    inset 0 0 20px rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.95);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: clamp(16px, 4vmin, 22px);
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease, transform 0.15s ease;
+}
+
+.flat-entry-btn:active {
+  background: rgba(255, 255, 255, 0.25);
+  border-color: rgba(255, 255, 255, 0.45);
+  transform: scale(0.96);
+}
+
+/* Hide controls until entry */
+.flat-controls-hidden .flat-tap-zone,
+.flat-controls-hidden .flat-joystick,
+.flat-controls-hidden .flat-reticle,
+.flat-controls-hidden .flat-return-btn {
+  display: none !important;
+}
+
+/* ── Joystick labels (subtle) ── */
+.flat-joystick-label {
+  position: absolute;
+  bottom: -18px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: clamp(8px, 2vmin, 11px);
+  color: rgba(255, 255, 255, 0.35);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  white-space: nowrap;
+  pointer-events: none;
+}

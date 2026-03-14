@@ -37,6 +37,10 @@ export class GaussianSplatWorld {
   private _rightPos = new THREE.Vector3();
   private _pivotOffset = new THREE.Vector3();
 
+  // Flat mode input (set externally each frame, consumed in update)
+  private flatLeftStick: { x: number; y: number } | null = null;
+  private flatVertical: number = 0;
+
   constructor(world: World) {
     this.world = world;
   }
@@ -184,6 +188,33 @@ export class GaussianSplatWorld {
       }
     }
 
+    // Flat-mode fallback: use virtual thumbstick values when no gamepads
+    if (!leftGamepad && !rightGamepad && this.flatLeftStick) {
+      camera.getWorldDirection(this._forward);
+      this._forward.y = 0;
+      this._forward.normalize();
+      this._right.crossVectors(this._forward, this._up).normalize();
+
+      let moveX = this.flatLeftStick.x;
+      let moveY = this.flatLeftStick.y;
+      let moveVertical = -this.flatVertical;
+
+      const deadZone = 0.15;
+      if (Math.abs(moveX) < deadZone) moveX = 0;
+      if (Math.abs(moveY) < deadZone) moveY = 0;
+      if (Math.abs(moveVertical) < deadZone) moveVertical = 0;
+
+      if (moveX !== 0 || moveY !== 0 || moveVertical !== 0) {
+        const speed = this.flySpeed * delta;
+        this.flyPosition.addScaledVector(this._right, moveX * speed);
+        this.flyPosition.addScaledVector(this._forward, -moveY * speed);
+        this.flyPosition.y += moveVertical * speed;
+      }
+
+      this.flatLeftStick = null;
+      this.flatVertical = 0;
+    }
+
     // Dual-trigger zoom: hold both triggers, move controllers
     // apart to zoom in (scale up splat), together to zoom out.
     if (leftGamepad && rightGamepad && this.splatMesh) {
@@ -238,6 +269,12 @@ export class GaussianSplatWorld {
     if (player?.position) {
       player.position.copy(this.flyPosition);
     }
+  }
+
+  /** Accept flat-mode virtual thumbstick input (called from index.ts each frame). */
+  setFlatInput(leftStick: { x: number; y: number }, rightStickY: number): void {
+    this.flatLeftStick = leftStick;
+    this.flatVertical = rightStickY;
   }
 
   /** Check if left controller Y button was just pressed (return to gallery). */

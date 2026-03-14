@@ -12,7 +12,12 @@
     },
     "meta-horizon-mcp": {
       "command": "npx",
-      "args": ["-y", "@meta-quest/hzdb", "mcp", "server"]
+      "args": [
+        "-y",
+        "@meta-quest/hzdb",
+        "mcp",
+        "server"
+      ]
     }
   }
 }
