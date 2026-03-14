@@ -44,6 +44,7 @@ export default defineConfig({
         device: "metaQuest3",
         activation: "localhost",
       },
+      ai: {}, // enables AI in agent mode with defaults
       verbose: true,
     }),
 

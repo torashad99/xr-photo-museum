@@ -16,5 +16,8 @@
       "Bash(npm search:*)",
       "Bash(npm list:*)"
     ]
-  }
+  },
+  "enabledMcpjsonServers": [
+    "iwsdk-dev-mcp"
+  ]
 }

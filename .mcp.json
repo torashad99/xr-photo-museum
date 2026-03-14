@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "iwsdk-dev-mcp": {
+      "command": "node",
+      "args": [
+        "C:\\IWSDKProject\\xr-photo-museum\\node_modules\\@iwsdk\\vite-plugin-dev\\dist\\mcp-server.js",
+        "--port",
+        "8081",
+        "--client-version",
+        "0.3.0"
+      ]
+    }
+  }
+}
