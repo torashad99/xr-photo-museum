@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>XR Photo Museum — Immersive WebXR Photo Gallery</title>
+  <meta name="description" content="An immersive WebXR photo gallery with AI-generated 3D worlds, real-time multiplayer, 3D annotations, and full mobile support. No app download required.">
+  <style>
+    /* ── Reset ── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      background: #080c14;
+      color: #e2e8f0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+    img { display: block; max-width: 100%; }
+
+    /* ── Hero ── */
+    .hero {
+      position: relative;
+      min-height: 100svh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: clamp(2rem, 6vw, 4rem) clamp(1.5rem, 4vw, 3rem);
+      text-align: center;
+      overflow: hidden;
+    }
+    .hero-bg {
+      position: absolute; inset: 0; pointer-events: none;
+      background:
+        radial-gradient(ellipse 55% 50% at 10% 20%, rgba(220,38,38,0.18) 0%, transparent 55%),
+        radial-gradient(ellipse 50% 45% at 35% 70%, rgba(22,163,74,0.15) 0%, transparent 55%),
+        radial-gradient(ellipse 60% 55% at 65% 15%, rgba(37,99,235,0.17) 0%, transparent 55%),
+        radial-gradient(ellipse 50% 50% at 88% 55%, rgba(217,119,6,0.15) 0%, transparent 55%),
+        radial-gradient(ellipse 45% 40% at 50% 90%, rgba(13,148,136,0.14) 0%, transparent 55%),
+        radial-gradient(ellipse 40% 35% at 78% 88%, rgba(219,39,119,0.12) 0%, transparent 55%);
+      animation: orb-drift 18s ease-in-out infinite alternate;
+    }
+    @keyframes orb-drift {
+      0%   { filter: hue-rotate(0deg)   brightness(1); }
+      33%  { filter: hue-rotate(20deg)  brightness(1.05); }
+      66%  { filter: hue-rotate(-15deg) brightness(0.97); }
+      100% { filter: hue-rotate(30deg)  brightness(1.03); }
+    }
+
+    .hero-content { position: relative; z-index: 1; max-width: 780px; }
+
+    .hero-badge {
+      display: inline-flex; align-items: center; gap: 0.4rem;
+      padding: 0.35rem 1.1rem;
+      border: 1px solid rgba(255,255,255,0.2);
+      border-radius: 100px;
+      font-size: 0.72rem; font-weight: 700; letter-spacing: 1.6px; text-transform: uppercase;
+      color: #e2e8f0; background: rgba(255,255,255,0.07);
+      backdrop-filter: blur(8px);
+      margin-bottom: 1.75rem;
+    }
+    .hero-badge::before {
+      content: ''; width: 6px; height: 6px; border-radius: 50%;
+      background: conic-gradient(from 0deg, #f87171, #fbbf24, #34d399, #60a5fa, #a78bfa, #f87171);
+      box-shadow: 0 0 8px rgba(255,255,255,0.4);
+    }
+
+    .hero-title {
+      font-size: clamp(2.8rem, 9vw, 6rem);
+      font-weight: 900;
+      line-height: 1.08;
+      letter-spacing: -0.03em;
+      background: linear-gradient(135deg, #f8fafc 0%, #f87171 20%, #fbbf24 40%, #34d399 60%, #60a5fa 80%, #c4b5fd 100%);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      background-clip: text;
+      margin-bottom: 1.1rem;
+    }
+    .hero-tagline {
+      font-size: clamp(1.05rem, 2.8vw, 1.4rem);
+      color: rgba(226,232,240,0.6);
+      line-height: 1.65;
+      margin-bottom: 2.25rem;
+      max-width: 560px; margin-left: auto; margin-right: auto;
+    }
+    .hero-props {
+      display: flex; flex-wrap: wrap; gap: 0.55rem;
+      justify-content: center; margin-bottom: 2.75rem;
+    }
+    .prop {
+      padding: 0.4rem 1rem;
+      border-radius: 100px;
+      background: rgba(255,255,255,0.07);
+      border: 1px solid rgba(255,255,255,0.11);
+      font-size: 0.8rem; font-weight: 500;
+      color: rgba(226,232,240,0.75);
+    }
+    .cta-wrap { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; }
+    .cta-btn {
+      display: inline-block;
+      padding: 0.9rem 2.5rem;
+      background: linear-gradient(135deg, #dc2626, #d97706, #16a34a, #2563eb, #7c3aed);
+      background-size: 300% 300%;
+      animation: btn-shimmer 6s ease infinite;
+      color: #fff; border-radius: 100px;
+      font-size: 1rem; font-weight: 600; text-decoration: none; letter-spacing: 0.2px;
+      box-shadow: 0 4px 32px rgba(99,102,241,0.3);
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    @keyframes btn-shimmer {
+      0%   { background-position: 0% 50%; }
+      50%  { background-position: 100% 50%; }
+      100% { background-position: 0% 50%; }
+    }
+    .cta-btn:hover { transform: translateY(-2px); box-shadow: 0 8px 40px rgba(99,102,241,0.45); }
+    .cta-btn:disabled, .cta-btn-disabled {
+      background: linear-gradient(135deg, rgba(220,38,38,0.4), rgba(217,119,6,0.4), rgba(22,163,74,0.4), rgba(37,99,235,0.4), rgba(124,58,237,0.4));
+      background-size: 300% 300%;
+      animation: btn-shimmer 8s ease infinite;
+      cursor: not-allowed;
+      color: rgba(226,232,240,0.85);
+      box-shadow: 0 4px 32px rgba(99,102,241,0.15);
+      border: none;
+    }
+    .cta-btn:disabled:hover, .cta-btn-disabled:hover {
+      transform: none;
+      box-shadow: 0 4px 32px rgba(99,102,241,0.15);
+    }
+    .cta-btn.secondary {
+      background: rgba(255,255,255,0.07);
+      border: 1px solid rgba(255,255,255,0.14);
+      box-shadow: none; color: rgba(226,232,240,0.85);
+    }
+    .cta-btn.secondary:hover { background: rgba(255,255,255,0.12); box-shadow: none; }
+
+    .hero-scroll {
+      position: absolute; bottom: 2rem; left: 50%; transform: translateX(-50%);
+      font-size: 0.72rem; color: rgba(255,255,255,0.28); letter-spacing: 1px; text-transform: uppercase;
+      display: flex; flex-direction: column; align-items: center; gap: 0.5rem;
+    }
+    .hero-scroll-arrow {
+      width: 1px; height: 28px;
+      background: linear-gradient(to bottom, rgba(255,255,255,0.3), transparent);
+      animation: scroll-pulse 2s ease-in-out infinite;
+    }
+    @keyframes scroll-pulse { 0%,100%{opacity:0.3;transform:scaleY(1)} 50%{opacity:1;transform:scaleY(1.2)} }
+
+    /* ── Section header ── */
+    .section-header {
+      text-align: center;
+      padding: clamp(3rem, 8vw, 5rem) clamp(1rem, 4vw, 2rem) clamp(2rem, 5vw, 3rem);
+    }
+    .section-eyebrow {
+      font-size: 0.72rem; font-weight: 700; letter-spacing: 2px; text-transform: uppercase;
+      color: #94a3b8; margin-bottom: 0.75rem;
+    }
+    .section-title {
+      font-size: clamp(1.8rem, 5vw, 3rem); font-weight: 800; color: #f8fafc;
+      line-height: 1.2; letter-spacing: -0.02em;
+    }
+
+    /* ── Features Grid ── */
+    .features {
+      padding: 0 clamp(1rem, 3vw, 2.5rem) clamp(3rem, 8vw, 6rem);
+      max-width: 1320px; margin: 0 auto;
+    }
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(12, 1fr);
+      gap: 1.25rem;
+    }
+
+    /* ── Cards ── */
+    .card {
+      grid-column: span 6;
+      border-radius: 20px;
+      background: rgba(255,255,255,0.035);
+      border: 1px solid rgba(255,255,255,0.08);
+      overflow: hidden;
+      transition: transform 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease;
+      display: flex; flex-direction: column;
+      position: relative;
+    }
+    .card:hover {
+      transform: translateY(-5px);
+      border-color: rgba(255,255,255,0.14);
+      box-shadow: 0 20px 60px rgba(0,0,0,0.45);
+    }
+    /* Accent top stripe */
+    .card::before {
+      content: ''; display: block; height: 3px;
+      background: var(--accent, #7c3aed);
+      box-shadow: 0 0 24px var(--accent-glow, rgba(124,58,237,0.35));
+      flex-shrink: 0;
+    }
+    /* Wide card */
+    .card--wide { grid-column: span 12; flex-direction: row; }
+    .card--wide::before { width: 3px; height: auto; position: absolute; top: 0; left: 0; bottom: 0; }
+    .card--wide .card-img-wrap { aspect-ratio: 16/7; flex: 1.3; }
+    .card--wide .card-body { flex: 1; padding: clamp(1.5rem, 3vw, 2.5rem); justify-content: center; }
+
+    /* Column widths */
+    .card--7 { grid-column: span 7; }
+    .card--5 { grid-column: span 5; }
+
+    /* Accent colors */
+    .c-purple { --accent: #7C3AED; --accent-glow: rgba(124,58,237,0.3); }
+    .c-red    { --accent: #EF4444; --accent-glow: rgba(239,68,68,0.28); }
+    .c-indigo { --accent: #6366F1; --accent-glow: rgba(99,102,241,0.28); }
+    .c-green  { --accent: #22C55E; --accent-glow: rgba(34,197,94,0.28); }
+    .c-amber  { --accent: #F59E0B; --accent-glow: rgba(245,158,11,0.28); }
+    .c-cyan   { --accent: #06B6D4; --accent-glow: rgba(6,182,212,0.28); }
+    .c-orange { --accent: #F97316; --accent-glow: rgba(249,115,22,0.28); }
+    .c-pink   { --accent: #EC4899; --accent-glow: rgba(236,72,153,0.28); }
+    .c-blue   { --accent: #3B82F6; --accent-glow: rgba(59,130,246,0.28); }
+    .c-teal   { --accent: #14B8A6; --accent-glow: rgba(20,184,166,0.28); }
+
+    /* Card inner glow on hover */
+    .card:hover::after {
+      content: '';
+      position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+      background: radial-gradient(ellipse 60% 40% at 50% 0%, var(--accent-glow, rgba(124,58,237,0.12)) 0%, transparent 70%);
+    }
+
+    .card-img-wrap {
+      width: 100%; aspect-ratio: 16/9;
+      overflow: hidden; background: #0d1117; flex-shrink: 0;
+    }
+    .card-img-wrap.portrait { aspect-ratio: 4/5; }
+    .card-img-wrap img,
+    .card-img-wrap video {
+      width: 100%; height: 100%; object-fit: cover;
+      transition: transform 0.45s ease;
+    }
+    .card-img-wrap.portrait video {
+      object-fit: contain;
+    }
+    .card:hover .card-img-wrap img,
+    .card:hover .card-img-wrap video { transform: scale(1.04); }
+
+    .card-body {
+      padding: 1.5rem; display: flex; flex-direction: column; gap: 0.55rem; flex: 1;
+    }
+    .card-tag {
+      font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 1.8px;
+      color: var(--accent, #a78bfa);
+    }
+    .card-title {
+      font-size: clamp(1.05rem, 2.2vw, 1.35rem); font-weight: 700;
+      color: #f1f5f9; line-height: 1.3;
+    }
+    .card-desc {
+      font-size: 0.875rem; color: rgba(226,232,240,0.55); line-height: 1.65;
+    }
+
+    /* ── Divider ── */
+    .divider {
+      height: 1px;
+      background: linear-gradient(to right, transparent, rgba(255,255,255,0.08), transparent);
+      margin: 0 clamp(1rem, 4vw, 3rem);
+    }
+
+    /* ── Compatibility footer ── */
+    .footer {
+      padding: clamp(3rem, 8vw, 5rem) clamp(1rem, 4vw, 3rem) clamp(2rem, 6vw, 4rem);
+      text-align: center;
+      max-width: 1100px; margin: 0 auto;
+      position: relative;
+      background:
+        radial-gradient(ellipse 50% 40% at 20% 100%, rgba(248,113,113,0.08) 0%, transparent 60%),
+        radial-gradient(ellipse 45% 35% at 80% 100%, rgba(96,165,250,0.07) 0%, transparent 60%);
+    }
+    .footer-eyebrow {
+      font-size: 0.7rem; font-weight: 700; letter-spacing: 2px; text-transform: uppercase;
+      background: linear-gradient(90deg, #f87171, #fbbf24, #34d399, #60a5fa, #a78bfa);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      background-clip: text;
+      margin-bottom: 1.5rem;
+    }
+    .compat-grid {
+      display: flex; flex-wrap: wrap; gap: 1rem;
+      justify-content: center; margin-bottom: 3rem;
+    }
+    .compat-card {
+      display: flex; align-items: center; gap: 0.75rem;
+      padding: 0.9rem 1.5rem;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 14px;
+      transition: border-color 0.2s, background 0.2s;
+    }
+    .compat-card:hover { border-color: rgba(255,255,255,0.16); background: rgba(255,255,255,0.07); }
+    .compat-icon { font-size: 1.5rem; }
+    .compat-svg { width: 2rem; height: 2rem; font-size: unset; flex-shrink: 0; }
+    .compat-text { text-align: left; }
+    .compat-name { font-size: 0.88rem; font-weight: 600; color: rgba(226,232,240,0.9); }
+    .compat-sub { font-size: 0.75rem; color: rgba(226,232,240,0.38); margin-top: 0.1rem; }
+
+    .footer-note {
+      font-size: 0.75rem; color: rgba(226,232,240,0.22);
+      line-height: 1.7;
+    }
+    .footer-note a { color: rgba(226,232,240,0.48); text-decoration: none; transition: color 0.2s; }
+    .footer-note a:hover { background: linear-gradient(90deg, #f87171, #fbbf24, #34d399, #60a5fa, #a78bfa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+
+    /* ── Responsive ── */
+    @media (max-width: 900px) {
+      .card, .card--7, .card--5 { grid-column: span 12 !important; }
+      .card--wide { flex-direction: column !important; }
+      .card--wide::before { width: 100%; height: 3px; position: static; }
+      .card--wide .card-img-wrap { aspect-ratio: 16/9 !important; }
+    }
+    @media (max-width: 600px) {
+      .features-grid { gap: 0.85rem; }
+      .hero-props { gap: 0.4rem; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ══ HERO ══ -->
+  <section class="hero">
+    <div class="hero-bg"></div>
+    <div class="hero-content">
+      <!-- <div class="hero-badge">Now Available · WebXR Experience</div> -->
+      <h1 class="hero-title">XR Photo Museum</h1>
+      <p class="hero-tagline">Step inside your memories. Explore AI-generated 3D worlds built from your photos. Share the experience with anyone, anywhere — no headset required.</p>
+      <div class="hero-props">
+        <span class="prop">🥽 Meta Quest Ready</span>
+        <span class="prop">🤖 AI-Generated Worlds</span>
+        <span class="prop">👥 Real-Time Multiplayer</span>
+        <span class="prop">📱 iOS &amp; Android</span>
+        <span class="prop">🌐 No App Download</span>
+      </div>
+      <div class="cta-wrap">
+        <button class="cta-btn cta-btn-disabled" disabled>Coming Soon</button>
+        <a href="#features" class="cta-btn secondary">Explore Features</a>
+      </div>
+    </div>
+    <div class="hero-scroll">
+      <span>Scroll</span>
+      <div class="hero-scroll-arrow"></div>
+    </div>
+  </section>
+
+  <!-- ══ FEATURES ══ -->
+  <div class="section-header" id="features">
+    <div class="section-eyebrow">Features</div>
+    <h2 class="section-title">Everything in one experience</h2>
+  </div>
+
+  <section class="features">
+    <div class="features-grid">
+
+      <!-- 1: WebXR Powered — wide -->
+      <article class="card card--wide c-purple">
+        <div class="card-img-wrap">
+          <img src="img/feature-1.png" alt="WebXR entry screen showing the Meta Quest 3 emulator with Enter XR button" loading="lazy">
+        </div>
+        <div class="card-body">
+          <span class="card-tag">WebXR · IWSDK</span>
+          <h2 class="card-title">Built for the Open Web</h2>
+          <p class="card-desc">No app store. No installation. Built on Meta's Immersive Web SDK (IWSDK) and Three.js, XR Photo Museum runs directly in any WebXR-capable browser. Visit a URL, click Enter XR, and you're inside — on Quest Browser, Chrome, Safari, Firefox or any WebXR runtime.</p>
+        </div>
+      </article>
+
+      <!-- 2: Museum Room — span 7 -->
+      <article class="card card--7 c-red">
+        <div class="card-img-wrap">
+          <video src="gifs/feature-2.mp4" alt="Immersive museum gallery with red, blue, and orange walls, 18 photo frames" autoplay muted loop data-start-seconds="0" data-end-seconds="10"></video>
+        </div>
+        <div class="card-body">
+          <span class="card-tag">Museum Room</span>
+          <h2 class="card-title">Your Gallery, in 3D</h2>
+          <p class="card-desc">Explore a 20×20 metre virtual gallery with distinct colored walls — red, green, blue, and orange — and 18 individually lit photo display frames. Fill them with your Photos via Google (Coming Soon)</p>
+        </div>
+      </article>
+
+      <!-- 3: Portal Frame — span 5 -->
+      <article class="card card--5 c-indigo">
+        <div class="card-img-wrap">
+          <video src="gifs/feature-3.mp4" alt="Portal frame with parallax shader image at back wall of museum" autoplay muted loop data-start-seconds="0" data-end-seconds="10"></video>
+        </div>
+        <div class="card-body">
+          <span class="card-tag">Portal Frame</span>
+          <h2 class="card-title">A Window to Another Dimension</h2>
+          <p class="card-desc">A special parallax-effect portal frame sits at the gallery's heart — shifting in depth as you move, beckoning you into a world beyond.</p>
+        </div>
+      </article>
+
+      <!-- 4: Generate World — wide -->
+      <article class="card card--wide c-green">
+        <div class="card-img-wrap">
+          <img src="img/feature-4.png" alt="Green Generate World button below the portal frame in the museum" loading="lazy">
+        </div>
+        <div class="card-body">
+          <span class="card-tag">World Labs API</span>
+          <h2 class="card-title">One Tap to Generate a World</h2>
+          <p class="card-desc">Point at the portal and press "Generate World." The World Labs Marble API transforms your photo into a full 3D Gaussian splat — a photorealistic environment you can fly through.</p>
+        </div>
+      </article>
+
+      <!-- 5: Splat World — wide -->
+      <article class="card card--wide c-cyan">
+        <div class="card-img-wrap">
+          <video src="gifs/feature-5.mp4" alt="Inside the museum from an angled view showing portal and colored walls" autoplay muted loop data-start-seconds="0" data-end-seconds="15"></video>
+        </div>
+        <div class="card-body">
+          <span class="card-tag">Gaussian Splat · SparkJS</span>
+          <h2 class="card-title">Fly Through Your Memories</h2>
+          <p class="card-desc">Step through the portal into a Gaussian splat world rendered by SparkJS. Free-fly in any direction with thumbsticks (XR) or the virtual joystick (mobile). Zoom, ascend, descend — your world rendered at a smooth FPS using GPU-instanced splat geometry.</p>
+        </div>
+      </article>
+
+      <!-- 6: Return Anytime — span 6 -->
+      <article class="card c-orange">
+        <div class="card-img-wrap">
+          <video src="gifs/feature-6.mp4" alt="Elevated aerial view of the museum gallery room showing all four colored walls" autoplay muted loop data-start-seconds="0" data-end-seconds="12"></video>
+        </div>
+        <div class="card-body">
+          <span class="card-tag">Return to Museum</span>
+          <h2 class="card-title">Always a Way Back</h2>
+          <p class="card-desc">Tap "Return to Museum" (or press the Y button on Quest controllers) to instantly exit the splat world. The generated world stays cached — re-enter it any time with one tap.</p>
+        </div>
+      </article>
+
+      <!-- 7: Annotations — span 6 -->
+      <article class="card c-pink">
+        <div class="card-img-wrap">
+          <video src="gifs/feature-7.mp4" alt="Museum interior from right-side wall angle showing frames and portal" autoplay muted loop data-start-seconds="0" data-end-seconds="12"></video>
+        </div>
+        <div class="card-body">
+          <span class="card-tag">Annotations · Drawings · Voice</span>
+          <h2 class="card-title">Leave Your Mark</h2>
+          <p class="card-desc">Place 3D text annotations anywhere in the gallery. Draw freehand 3D strokes with your right hand or controller. Record voice notes and drop them in space — all synced in real-time across every connected user.</p>
+        </div>
+      </article>
+
+      <!-- 8: Flat Mode — span 6 -->
+      <article class="card c-blue">
+        <div class="card-img-wrap portrait">
+          <video src="gifs/feature-8.mp4" alt="Mobile flat mode with glassmorphic joystick, up/down buttons, reticle, and Return to Museum button" autoplay muted loop data-start-seconds="0" data-end-seconds="12"></video>
+        </div>
+        <div class="card-body">
+          <span class="card-tag">Flat Mode · Mobile</span>
+          <h2 class="card-title">Touch Controls Built-In</h2>
+          <p class="card-desc">On phones and tablets, XR Photo Museum switches to flat mode automatically. A glassmorphic joystick handles movement, screen-drag controls the camera (Minecraft PE-style), and up/down buttons fly in splat worlds — no headset needed.</p>
+        </div>
+      </article>
+
+      <!-- 9: Multiplayer — span 6 -->
+      <article class="card c-teal">
+        <div class="card-img-wrap">
+          <img src="img/feature-9.png" alt="Museum room with controllers and portal frame visible from a side angle" loading="lazy">
+        </div>
+        <div class="card-body">
+          <span class="card-tag">Real-Time Multiplayer</span>
+          <h2 class="card-title">Share the Experience</h2>
+          <p class="card-desc">Share an invite link and see each other's avatars appear in the gallery. Multiplayer syncs positions, annotations, drawings, and voice notes in real time via Socket.IO. Passphrase-based rooms — no account required. (Coming Soon)</p>
+        </div>
+      </article>
+
+    </div>
+  </section>
+
+  <div class="divider"></div>
+
+  <!-- ══ COMPATIBILITY ══ -->
+  <footer class="footer">
+    <div class="footer-eyebrow">Compatible With</div>
+    <div class="compat-grid">
+      <div class="compat-card">
+        <img src="icons/meta.svg" alt="Meta Quest icon" class="compat-icon compat-svg">
+        <div class="compat-text">
+          <div class="compat-name">Meta Quest 3/ 3S / Pro / 2 (Quest Browser Preferred)</div>
+          <div class="compat-sub">Full XR · Controllers</div>
+        </div>
+      </div>
+      <div class="compat-card">
+        <span class="compat-icon">💻</span>
+        <div class="compat-text">
+          <div class="compat-name">Desktop (Chrome / Edge Preferred)</div>
+          <div class="compat-sub">WebXR emulator · IWER support</div>
+        </div>
+      </div>
+      <div class="compat-card">
+        <img src="icons/apple.svg" alt="Apple iOS icon" class="compat-icon compat-svg">
+        <div class="compat-text">
+          <div class="compat-name">iOS (Safari Preferred)</div>
+          <div class="compat-sub">Flat mode · Touch controls</div>
+        </div>
+      </div>
+      <div class="compat-card">
+        <img src="icons/android.svg" alt="Android icon" class="compat-icon compat-svg">
+        <div class="compat-text">
+          <div class="compat-name">Android (Chrome Preferred)</div>
+          <div class="compat-sub">Flat mode · Touch controls</div>
+        </div>
+      </div>
+      <div class="compat-card">
+        <span class="compat-icon">🌐</span>
+        <div class="compat-text">
+          <div class="compat-name">Any WebXR Browser on Headset / Glasses</div>
+          <div class="compat-sub">Currently in Pre-Alpha (Theoretical Assumption due to WebXR Device API)</div>
+        </div>
+      </div>
+    </div>
+    <p class="footer-note">
+      XR Photo Museum · Built with <a href="https://iwsdk.dev/" target="_blank" rel="noopener">IWSDK</a> +
+      <a href="https://threejs.org" target="_blank" rel="noopener">Three.js</a> +
+      <a href="https://sparkjs.dev" target="_blank" rel="noopener">SparkJS</a> +
+      <a href="https://socket.io" target="_blank" rel="noopener">Socket.IO</a><br>
+      Gaussian splat worlds powered by <a href="https://worldlabs.ai" target="_blank" rel="noopener">World Labs</a>
+    </p>
+  </footer>
+
+</body>
+</html>

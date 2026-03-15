@@ -18,7 +18,11 @@
       "mcp__meta-horizon-mcp__fetch_meta_quest_doc",
       "mcp__meta-horizon-mcp__search_docs",
       "WebFetch(domain:pmndrs.github.io)",
-      "WebFetch(domain:www.npmjs.com)"
+      "WebFetch(domain:www.npmjs.com)",
+      "mcp__iwsdk-dev-mcp__xr_get_session_status",
+      "Bash(curl:*)",
+      "Bash(npx playwright:*)",
+      "Bash(cd:*)"
     ]
   },
   "enableAllProjectMcpServers": true,
