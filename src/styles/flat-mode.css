@@ -42,10 +42,6 @@
   left: calc(max(20px, env(safe-area-inset-left, 0px)) + 20px);
 }
 
-.flat-joystick-right {
-  bottom: calc(max(20px, env(safe-area-inset-bottom, 0px)) + 20px);
-  right: calc(max(20px, env(safe-area-inset-right, 0px)) + 20px);
-}
 
 .flat-joystick-knob {
   position: absolute;
@@ -222,11 +218,59 @@
   transform: scale(0.96);
 }
 
+/* ── Up/Down vertical movement buttons (splat world only) ── */
+.flat-vertical-btn {
+  position: absolute;
+  right: calc(max(20px, env(safe-area-inset-right, 0px)) + 20px);
+  width: clamp(56px, 14vmin, 80px);
+  height: clamp(56px, 14vmin, 80px);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.10);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1.5px solid rgba(255, 255, 255, 0.22);
+  box-shadow:
+    0 4px 30px rgba(0, 0, 0, 0.08),
+    inset 0 0 20px rgba(255, 255, 255, 0.04);
+  pointer-events: auto;
+  touch-action: none;
+  z-index: 1010;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  font-size: clamp(18px, 4.5vmin, 28px);
+  color: rgba(255, 255, 255, 0.70);
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.flat-vertical-btn.visible {
+  display: flex;
+}
+
+.flat-vertical-btn.pressed,
+.flat-vertical-btn:active {
+  background: rgba(255, 255, 255, 0.25);
+  border-color: rgba(255, 255, 255, 0.40);
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.flat-vertical-up {
+  bottom: calc(max(20px, env(safe-area-inset-bottom, 0px)) + clamp(76px, 19vmin, 108px));
+}
+
+.flat-vertical-down {
+  bottom: calc(max(20px, env(safe-area-inset-bottom, 0px)) + 10px);
+}
+
 /* Hide controls until entry */
 .flat-controls-hidden .flat-tap-zone,
 .flat-controls-hidden .flat-joystick,
 .flat-controls-hidden .flat-reticle,
-.flat-controls-hidden .flat-return-btn {
+.flat-controls-hidden .flat-return-btn,
+.flat-controls-hidden .flat-vertical-btn {
   display: none !important;
 }
 

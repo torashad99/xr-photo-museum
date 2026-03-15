@@ -391,8 +391,9 @@ class PhotoMuseumApp {
 
       this.inSplatWorld = true;
 
-      // Show "Return to Museum" button in flat mode
+      // Show "Return to Museum" button and vertical buttons in flat mode
       this.flatMode?.setReturnButtonVisible(true);
+      this.flatMode?.setVerticalButtonsVisible(true);
 
     } catch (err) {
       console.error('[SplatWorld] Failed to enter splat world:', err);
@@ -449,8 +450,9 @@ class PhotoMuseumApp {
 
     this.inSplatWorld = false;
 
-    // Hide "Return to Museum" button in flat mode
+    // Hide "Return to Museum" button and vertical buttons in flat mode
     this.flatMode?.setReturnButtonVisible(false);
+    this.flatMode?.setVerticalButtonsVisible(false);
 
     // Reset flat mode position to in front of portal
     if (this.flatMode) {
@@ -472,16 +474,16 @@ class PhotoMuseumApp {
   }
 
   // ── Flat mode: camera rotation ──
-  private applyFlatModeCamera(input: FlatModeInput, delta: number): void {
-    const sensitivity = 2.0; // rad/s at full deflection
-    this.flatYaw -= input.rightStick.x * sensitivity * delta;
+  private applyFlatModeCamera(input: FlatModeInput, _delta: number): void {
+    const sensitivity = 0.003; // radians per pixel of screen drag
+    this.flatYaw -= input.lookDelta.x * sensitivity;
+    this.flatPitch -= input.lookDelta.y * sensitivity;
 
     if (!this.inSplatWorld) {
-      // Gallery: right stick Y = pitch (look up/down)
-      this.flatPitch -= input.rightStick.y * sensitivity * delta;
       this.flatPitch = THREE.MathUtils.clamp(this.flatPitch, -Math.PI / 3, Math.PI / 3);
+    } else {
+      this.flatPitch = THREE.MathUtils.clamp(this.flatPitch, -Math.PI * 4 / 9, Math.PI * 4 / 9);
     }
-    // In splat world, right stick Y is vertical fly (handled by GaussianSplatWorld)
 
     // Yaw on the player rig, pitch on the camera
     const player = (this.world as any).player;
@@ -540,7 +542,7 @@ class PhotoMuseumApp {
           this.applyFlatModeMovement(flatInput, delta);
         } else {
           // Splat world: feed virtual sticks to GaussianSplatWorld
-          this.gaussianSplatWorld?.setFlatInput(flatInput.leftStick, flatInput.rightStick.y);
+          this.gaussianSplatWorld?.setFlatInput(flatInput.leftStick, flatInput.verticalInput);
 
           // Return to Museum button
           if (flatInput.returnPressed) {

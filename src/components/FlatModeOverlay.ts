@@ -1,12 +1,13 @@
 // src/components/FlatModeOverlay.ts
-// Mobile touch overlay — dual joysticks, center reticle, return button.
+// Mobile touch overlay — left joystick, full-screen touch-look, up/down buttons, center reticle, return button.
 // Glassmorphism styling via flat-mode.css.
 
 import '../styles/flat-mode.css';
 
 export interface FlatModeInput {
   leftStick: { x: number; y: number };
-  rightStick: { x: number; y: number };
+  lookDelta: { x: number; y: number }; // pixel deltas since last frame, consumed on read
+  verticalInput: number;               // -1 (down), 0 (neutral), 1 (up) — from buttons
   interactPressed: boolean;
   returnPressed: boolean;
 }
@@ -24,11 +25,28 @@ export class FlatModeOverlay {
   private container: HTMLDivElement;
 
   private leftStick: JoystickState;
-  private rightStick: JoystickState;
 
   private reticleEl: HTMLDivElement;
   private returnBtn: HTMLDivElement;
   private tapZone: HTMLDivElement;
+
+  // Touch-look state
+  private lookPointerId: number | null = null;
+  private lookLastX = 0;
+  private lookLastY = 0;
+  private lookDeltaX = 0;
+  private lookDeltaY = 0;
+  private lookStartX = 0;
+  private lookStartY = 0;
+  private lookStartTime = 0;
+  private lookMoved = false;
+
+  // Up/Down vertical buttons
+  private upBtn: HTMLDivElement;
+  private downBtn: HTMLDivElement;
+  private upPointerId: number | null = null;
+  private downPointerId: number | null = null;
+  private _verticalInput = 0;
 
   // One-frame flags (consumed after getInput)
   private _interactPressed = false;
@@ -56,16 +74,15 @@ export class FlatModeOverlay {
 
     this.leftStick = { pointerId: null, x: 0, y: 0, el: leftEl, knob: leftKnob, maxRadius: 0 };
 
-    // ── Right joystick ──
-    const rightEl = this.createDiv('flat-joystick flat-joystick-right');
-    const rightKnob = this.createDiv('flat-joystick-knob');
-    rightEl.appendChild(rightKnob);
-    const rightLabel = this.createDiv('flat-joystick-label');
-    rightLabel.textContent = 'Look';
-    rightEl.appendChild(rightLabel);
-    this.container.appendChild(rightEl);
+    // ── Up button ──
+    this.upBtn = this.createDiv('flat-vertical-btn flat-vertical-up');
+    this.upBtn.textContent = '▲';
+    this.container.appendChild(this.upBtn);
 
-    this.rightStick = { pointerId: null, x: 0, y: 0, el: rightEl, knob: rightKnob, maxRadius: 0 };
+    // ── Down button ──
+    this.downBtn = this.createDiv('flat-vertical-btn flat-vertical-down');
+    this.downBtn.textContent = '▼';
+    this.container.appendChild(this.downBtn);
 
     // ── Reticle ──
     this.reticleEl = this.createDiv('flat-reticle');
@@ -80,8 +97,8 @@ export class FlatModeOverlay {
 
     // ── Event listeners ──
     this.bindJoystick(this.leftStick);
-    this.bindJoystick(this.rightStick);
-    this.bindTapZone();
+    this.bindTouchLook();
+    this.bindVerticalButtons();
     this.bindReturnButton();
   }
 
@@ -90,11 +107,14 @@ export class FlatModeOverlay {
   getInput(): FlatModeInput {
     const result: FlatModeInput = {
       leftStick: { x: this.leftStick.x, y: this.leftStick.y },
-      rightStick: { x: this.rightStick.x, y: this.rightStick.y },
+      lookDelta: { x: this.lookDeltaX, y: this.lookDeltaY },
+      verticalInput: this._verticalInput,
       interactPressed: this._interactPressed,
       returnPressed: this._returnPressed,
     };
-    // Consume one-frame flags
+    // Consume per-frame accumulators and one-frame flags
+    this.lookDeltaX = 0;
+    this.lookDeltaY = 0;
     this._interactPressed = false;
     this._returnPressed = false;
     return result;
@@ -105,6 +125,20 @@ export class FlatModeOverlay {
       this.returnBtn.classList.add('visible');
     } else {
       this.returnBtn.classList.remove('visible');
+    }
+  }
+
+  setVerticalButtonsVisible(visible: boolean): void {
+    if (visible) {
+      this.upBtn.classList.add('visible');
+      this.downBtn.classList.add('visible');
+    } else {
+      this.upBtn.classList.remove('visible');
+      this.downBtn.classList.remove('visible');
+      // Reset held state when hiding
+      this._verticalInput = 0;
+      this.upPointerId = null;
+      this.downPointerId = null;
     }
   }
 
@@ -128,7 +162,7 @@ export class FlatModeOverlay {
       splash.appendChild(title);
 
       const subtitle = this.createDiv('flat-entry-subtitle');
-      subtitle.textContent = 'Use the joysticks to explore the museum and tap to interact';
+      subtitle.textContent = 'Drag to look around, use joystick to move, tap to interact';
       splash.appendChild(subtitle);
 
       const btn = this.createDiv('flat-entry-btn');
@@ -211,17 +245,106 @@ export class FlatModeOverlay {
     el.addEventListener('pointercancel', resetStick);
   }
 
-  // ── Tap zone (interact) ──
+  // ── Touch-look (replaces right joystick + old tap zone) ──
 
-  private bindTapZone(): void {
+  private bindTouchLook(): void {
     this.tapZone.addEventListener('pointerdown', (e: PointerEvent) => {
-      // Only count as interact if not on a joystick or button
       const target = e.target as HTMLElement;
-      if (target === this.tapZone) {
-        e.preventDefault();
-        this._interactPressed = true;
+      if (target !== this.tapZone) return; // only respond to direct tap zone hits
+      if (this.lookPointerId !== null) return; // already tracking a look touch
+
+      e.preventDefault();
+      this.tapZone.setPointerCapture(e.pointerId);
+      this.lookPointerId = e.pointerId;
+      this.lookLastX = e.clientX;
+      this.lookLastY = e.clientY;
+      this.lookStartX = e.clientX;
+      this.lookStartY = e.clientY;
+      this.lookStartTime = performance.now();
+      this.lookMoved = false;
+    });
+
+    this.tapZone.addEventListener('pointermove', (e: PointerEvent) => {
+      if (e.pointerId !== this.lookPointerId) return;
+      e.preventDefault();
+
+      const dx = e.clientX - this.lookLastX;
+      const dy = e.clientY - this.lookLastY;
+      this.lookDeltaX += dx;
+      this.lookDeltaY += dy;
+      this.lookLastX = e.clientX;
+      this.lookLastY = e.clientY;
+
+      // Mark as drag if moved more than 8px from start
+      if (!this.lookMoved) {
+        const totalDx = e.clientX - this.lookStartX;
+        const totalDy = e.clientY - this.lookStartY;
+        if (Math.sqrt(totalDx * totalDx + totalDy * totalDy) > 8) {
+          this.lookMoved = true;
+        }
       }
     });
+
+    const endLook = (e: PointerEvent, isCancelled: boolean) => {
+      if (e.pointerId !== this.lookPointerId) return;
+
+      // Tap: short press without significant movement = interact
+      if (!isCancelled && !this.lookMoved && (performance.now() - this.lookStartTime) < 300) {
+        this._interactPressed = true;
+      }
+
+      this.lookPointerId = null;
+      this.lookDeltaX = 0;
+      this.lookDeltaY = 0;
+    };
+
+    this.tapZone.addEventListener('pointerup', (e: PointerEvent) => endLook(e, false));
+    this.tapZone.addEventListener('pointercancel', (e: PointerEvent) => endLook(e, true));
+  }
+
+  // ── Up/Down vertical movement buttons ──
+
+  private bindVerticalButtons(): void {
+    const bindBtn = (
+      btn: HTMLDivElement,
+      value: number,
+      getPointerId: () => number | null,
+      setPointerId: (id: number | null) => void,
+    ) => {
+      btn.addEventListener('pointerdown', (e: PointerEvent) => {
+        if (getPointerId() !== null) return;
+        e.preventDefault();
+        e.stopPropagation();
+        btn.setPointerCapture(e.pointerId);
+        setPointerId(e.pointerId);
+        this._verticalInput = value;
+        btn.classList.add('pressed');
+      });
+
+      const release = (e: PointerEvent) => {
+        if (e.pointerId !== getPointerId()) return;
+        setPointerId(null);
+        btn.classList.remove('pressed');
+        // Only clear vertical input if this button was driving it
+        if (this._verticalInput === value) {
+          this._verticalInput = 0;
+        }
+      };
+
+      btn.addEventListener('pointerup', release);
+      btn.addEventListener('pointercancel', release);
+    };
+
+    bindBtn(
+      this.upBtn, 1,
+      () => this.upPointerId,
+      (id) => { this.upPointerId = id; },
+    );
+    bindBtn(
+      this.downBtn, -1,
+      () => this.downPointerId,
+      (id) => { this.downPointerId = id; },
+    );
   }
 
   // ── Return button ──

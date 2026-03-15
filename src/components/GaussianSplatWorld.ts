@@ -197,7 +197,7 @@ export class GaussianSplatWorld {
 
       let moveX = this.flatLeftStick.x;
       let moveY = this.flatLeftStick.y;
-      let moveVertical = -this.flatVertical;
+      let moveVertical = this.flatVertical;
 
       const deadZone = 0.15;
       if (Math.abs(moveX) < deadZone) moveX = 0;
@@ -272,9 +272,9 @@ export class GaussianSplatWorld {
   }
 
   /** Accept flat-mode virtual thumbstick input (called from index.ts each frame). */
-  setFlatInput(leftStick: { x: number; y: number }, rightStickY: number): void {
+  setFlatInput(leftStick: { x: number; y: number }, verticalInput: number): void {
     this.flatLeftStick = leftStick;
-    this.flatVertical = rightStickY;
+    this.flatVertical = verticalInput;
   }
 
   /** Check if left controller Y button was just pressed (return to gallery). */
