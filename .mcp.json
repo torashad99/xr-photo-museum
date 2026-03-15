@@ -11,8 +11,10 @@
       ]
     },
     "meta-horizon-mcp": {
-      "command": "npx",
+      "command": "cmd",
       "args": [
+        "/c",
+        "npx",
         "-y",
         "@meta-quest/hzdb",
         "mcp",
