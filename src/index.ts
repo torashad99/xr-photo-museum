@@ -72,7 +72,6 @@ class PhotoMuseumApp {
     // Detect flat mode BEFORE World.create() so we can disable XR session
     // auto-offer — phones hang when IWSDK tries to offer a session they can't support.
     const isFlatMode = await this.detectFlatMode();
-    console.log('[Init] Flat mode detected:', isFlatMode, '| hostname:', location.hostname, '| navigator.xr:', !!navigator.xr);
 
     this.world = await World.create(container, {
       features: { locomotion: true },
@@ -146,10 +145,8 @@ class PhotoMuseumApp {
     this.creativeInput = new CreativeInputSystem(this.world, this.multiplayer);
 
     // Setup flat mode overlay (detection already ran above before World.create)
-    console.log('[Init] Setting up flat mode overlay, isFlatMode:', isFlatMode);
     if (isFlatMode) {
       const overlayContainer = document.getElementById('flat-mode-overlay');
-      console.log('[Init] Overlay container found:', !!overlayContainer);
       if (overlayContainer) {
         this.flatMode = new FlatModeOverlay(overlayContainer);
         // Prevent browser gestures on the 3D canvas
@@ -159,11 +156,8 @@ class PhotoMuseumApp {
         if (player?.position) {
           this.flatPosition.copy(player.position);
         }
-        console.log('[FlatMode] Detected — showing entry screen');
         // Show entry splash; controls hidden until user taps "Enter"
-        this.flatMode.showEntryScreen().then(() => {
-          console.log('[FlatMode] User entered — touch controls active');
-        });
+        this.flatMode.showEntryScreen();
       }
     }
 
@@ -511,8 +505,9 @@ class PhotoMuseumApp {
       // Clamp to museum walls (20×20 room, walls at ±10)
       this.flatPosition.x = THREE.MathUtils.clamp(this.flatPosition.x, -9.5, 9.5);
       this.flatPosition.z = THREE.MathUtils.clamp(this.flatPosition.z, -9.5, 9.5);
-      this.flatPosition.y = 1.6; // Eye height, floor-locked
     }
+
+    this.flatPosition.y = 0.5; // Eye height for flat mode
 
     const player = (this.world as any).player;
     if (player?.position) {
