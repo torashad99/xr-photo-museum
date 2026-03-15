@@ -47,3 +47,6 @@ Express + Socket.IO. Manages rooms (passphrase-based IDs), relays user positions
 ### Networking
 
 Vite dev server proxies `/socket.io` to `localhost:3001`. The Socket.IO client connects with default `io()` (same origin). Room IDs are two-word passphrases (e.g., `tiger-moon`). Invite links use `?room=<passphrase>` query param.
+
+### Compact Instructions
+Before any /compact or when context exceeds 80%, summarize the current task status, key decisions, and any 'gotchas' into a progress.md file or project memory.
