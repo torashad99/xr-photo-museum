@@ -35,11 +35,13 @@ export function createMuseumRoom(world: World): { roomEntity: Entity; floorEntit
   const floorEntity = world.createTransformEntity(floor);
   floorEntity.addComponent(LocomotionEnvironment);
 
-  // Walls
-  const wallMaterial = new THREE.MeshStandardMaterial({
-    color: 0xF5F5DC,
-    roughness: 0.9
-  });
+  // Walls — each with different color
+  const wallColors = [
+    0xFF0000,  // Red — Back wall
+    0x00FF00,  // Green — Front wall
+    0x0000FF,  // Blue — Left wall
+    0xFFA500,  // Orange — Right wall
+  ];
 
   const wallPositions = [
     { pos: [0, 2.5, -10], rot: [0, 0, 0] },      // Back wall
@@ -48,8 +50,12 @@ export function createMuseumRoom(world: World): { roomEntity: Entity; floorEntit
     { pos: [10, 2.5, 0], rot: [0, -Math.PI / 2, 0] },  // Right wall
   ];
 
-  wallPositions.forEach(({ pos, rot }) => {
+  wallPositions.forEach(({ pos, rot }, index) => {
     const wallGeometry = new THREE.PlaneGeometry(20, 5);
+    const wallMaterial = new THREE.MeshStandardMaterial({
+      color: wallColors[index],
+      roughness: 0.9
+    });
     const wall = new THREE.Mesh(wallGeometry, wallMaterial);
     wall.position.set(pos[0], pos[1], pos[2]);
     wall.rotation.set(rot[0], rot[1], rot[2]);

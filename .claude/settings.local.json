@@ -16,12 +16,14 @@
       "Bash(npm search:*)",
       "Bash(npm list:*)",
       "mcp__meta-horizon-mcp__fetch_meta_quest_doc",
-      "mcp__meta-horizon-mcp__search_docs"
+      "mcp__meta-horizon-mcp__search_docs",
+      "WebFetch(domain:pmndrs.github.io)",
+      "WebFetch(domain:www.npmjs.com)"
     ]
   },
+  "enableAllProjectMcpServers": true,
   "enabledMcpjsonServers": [
     "iwsdk-dev-mcp",
     "meta-horizon-mcp"
-  ],
-  "enableAllProjectMcpServers": true
+  ]
 }
