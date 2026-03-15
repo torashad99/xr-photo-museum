@@ -20,6 +20,8 @@
     ]
   },
   "enabledMcpjsonServers": [
-    "iwsdk-dev-mcp"
-  ]
+    "iwsdk-dev-mcp",
+    "meta-horizon-mcp"
+  ],
+  "enableAllProjectMcpServers": true
 }
