@@ -8,7 +8,7 @@ export const DrawingStroke = createComponent('DrawingStroke', {
 // Track all stroke lines for hide/show
 const strokeLines: Set<THREE.Line> = new Set();
 
-export function startStroke(world: World, color: string = 'black', startPoint: THREE.Vector3): { entity: Entity, line: THREE.Line, points: THREE.Vector3[] } {
+export function startStroke(world: World, color: string = 'black', startPoint: THREE.Vector3, context: 'museum' | 'splat' = 'museum'): { entity: Entity, line: THREE.Line, points: THREE.Vector3[] } {
     // Create geometry with initial capacity
     const MAX_POINTS = 3000;
     const geometry = new THREE.BufferGeometry();
@@ -38,6 +38,7 @@ export function startStroke(world: World, color: string = 'black', startPoint: T
         color: color,
     });
 
+    line.userData.context = context;
     strokeLines.add(line);
 
     const points = [startPoint.clone()];
@@ -74,5 +75,11 @@ export function hideAllDrawings(): void {
 export function showAllDrawings(): void {
     for (const line of strokeLines) {
         if (line.parent) line.visible = true;
+    }
+}
+
+export function showDrawingsInContext(context: 'museum' | 'splat'): void {
+    for (const line of strokeLines) {
+        if (line.parent) line.visible = line.userData.context === context;
     }
 }

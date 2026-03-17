@@ -12,18 +12,20 @@ const voiceNoteGroups: Set<THREE.Group> = new Set();
 // Spheres with userData.onClick for raycast interaction
 const voiceNoteSpheres: Set<THREE.Mesh> = new Set();
 
-/** Returns all active voice note spheres (parent still in scene) for raycasting. */
+/** Returns all active, visible voice note spheres for raycasting/touch. */
 export function getVoiceNoteSpheres(): THREE.Mesh[] {
     for (const m of voiceNoteSpheres) {
         if (!m.parent) voiceNoteSpheres.delete(m);
     }
-    return [...voiceNoteSpheres];
+    // Skip spheres whose parent group is hidden (wrong context)
+    return [...voiceNoteSpheres].filter(m => m.parent?.visible !== false);
 }
 
 export function createVoiceNote(
     world: World,
     position: THREE.Vector3,
-    audioUrl: string
+    audioUrl: string,
+    context: 'museum' | 'splat' = 'museum',
 ): Entity {
     const group = new THREE.Group();
     const entity = world.createTransformEntity(group);
@@ -77,6 +79,7 @@ export function createVoiceNote(
     voiceNoteGroups.add(group);
     voiceNoteSpheres.add(sphere);
 
+    group.userData.context = context;
     group.position.copy(position);
 
     // Store audio and set up click-to-play
@@ -139,5 +142,11 @@ export function hideAllVoiceNotes(): void {
 export function showAllVoiceNotes(): void {
     for (const group of voiceNoteGroups) {
         if (group.parent) group.visible = true;
+    }
+}
+
+export function showVoiceNotesInContext(context: 'museum' | 'splat'): void {
+    for (const group of voiceNoteGroups) {
+        if (group.parent) group.visible = group.userData.context === context;
     }
 }

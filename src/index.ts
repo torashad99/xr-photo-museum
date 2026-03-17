@@ -5,12 +5,12 @@ import * as THREE from 'three';
 import { createMuseumRoom } from './components/MuseumRoom';
 import { createPhotoFrame, generateFramePositions, setFramePhoto } from './components/PhotoFrame';
 import { createAnnotation, updateAnnotationFacing, hideAllAnnotations, showAllAnnotations } from './components/Annotation';
-import { createVoiceNote, updateVoiceNoteFacing, hideAllVoiceNotes, showAllVoiceNotes, getVoiceNoteSpheres } from './components/VoiceNote';
+import { createVoiceNote, updateVoiceNoteFacing, hideAllVoiceNotes, showAllVoiceNotes, showVoiceNotesInContext, getVoiceNoteSpheres } from './components/VoiceNote';
 import { GoogleAuthService } from './services/googleAuth';
 import { GooglePhotosService, MediaItem } from './services/photosService'
 import { MultiplayerService, RemoteUser } from './services/MultiplayerService';
 import { CreativeInputSystem } from './components/CreativeInputSystem';
-import { startStroke, addPointToStroke, hideAllDrawings, showAllDrawings } from './components/Drawing';
+import { startStroke, addPointToStroke, hideAllDrawings, showAllDrawings, showDrawingsInContext } from './components/Drawing';
 import { createPortalFrame, PortalFrameHandle } from './components/PortalFrame';
 import { createPortalUI, PortalUIHandle, PortalButtonState } from './components/PortalUI';
 import { GaussianSplatWorld } from './components/GaussianSplatWorld';
@@ -50,6 +50,8 @@ class PhotoMuseumApp {
   private _xrRaycaster = new THREE.Raycaster();
   private _xrRayDir = new THREE.Vector3();
   private _xrRayOrigin = new THREE.Vector3();
+  // Tracks spheres currently being touched to fire onClick only once per contact
+  private _touchedVoiceSpheres = new Set<THREE.Mesh>();
 
   // Hardcoded portal image (for debugging)
   private readonly PORTAL_IMAGE_URL = '/portal-image.jpg';
@@ -371,10 +373,13 @@ class PhotoMuseumApp {
         }
       }
 
-      // Hide all museum drawings, annotations, and voice notes
+      // Hide museum drawings and voice notes; splat ones will be shown as they're created
       hideAllAnnotations();
-      hideAllVoiceNotes();
-      hideAllDrawings();
+      showVoiceNotesInContext('splat'); // hides museum, shows splat (initially empty)
+      showDrawingsInContext('splat');   // hides museum, shows splat (initially empty)
+
+      // Switch creative input to splat context so new items are tagged correctly
+      this.creativeInput?.setContext('splat');
 
       // Load splat
       this.gaussianSplatWorld = new GaussianSplatWorld(this.world);
@@ -388,6 +393,12 @@ class PhotoMuseumApp {
         locomotor.teleport(new THREE.Vector3(0, 1.6, 0));
       }
 
+      // Stop ALL locomotion systems (slide + teleport + turn).
+      // They may be registered as separate systems, so stopping just
+      // LocomotionSystem isn't enough — TeleportSystem would still show
+      // its arc/reticle, and SlideSystem would fight with flyPosition.
+      for (const sys of this.getLocomotionSystemsToStop()) sys.stop();
+
       this.inSplatWorld = true;
 
       // Show "Return to Museum" button and vertical buttons in flat mode
@@ -400,6 +411,9 @@ class PhotoMuseumApp {
   }
 
   private exitSplatWorld(): void {
+    // Re-enable full locomotion (slide + teleport + turn) for the gallery
+    for (const sys of this.getLocomotionSystemsToStop()) sys.play();
+
     // Dispose splat
     this.gaussianSplatWorld?.dispose();
     this.gaussianSplatWorld = null;
@@ -419,10 +433,13 @@ class PhotoMuseumApp {
     }
     if (this.portalFrame) this.portalFrame.group.visible = true;
 
-    // Restore museum drawings, annotations, and voice notes
+    // Restore museum drawings, annotations, and voice notes; hide splat ones
     showAllAnnotations();
-    showAllVoiceNotes();
-    showAllDrawings();
+    showVoiceNotesInContext('museum');
+    showDrawingsInContext('museum');
+
+    // Switch creative input back to museum context
+    this.creativeInput?.setContext('museum');
 
     // Re-create portal UI — splat is cached now so go straight to "Enter World"
     const framePositions = generateFramePositions(18);
@@ -470,6 +487,21 @@ class PhotoMuseumApp {
       }
     }
     return null;
+  }
+
+  /**
+   * Find all locomotion-related systems (LocomotionSystem, TeleportSystem,
+   * SlideSystem, TurnSystem). They may be registered independently, so
+   * stopping just the parent LocomotionSystem isn't enough.
+   */
+  /** Systems to stop in splat world (everything except TurnSystem). */
+  private getLocomotionSystemsToStop(): any[] {
+    const systems = (this.world as any)._systems || (this.world as any).systems;
+    if (!systems) return [];
+    const STOP_NAMES = ['LocomotionSystem', 'TeleportSystem', 'SlideSystem'];
+    return [...systems].filter(
+      (sys: any) => sys.locomotor || STOP_NAMES.includes(sys.constructor?.name),
+    );
   }
 
   // ── Flat mode: camera rotation ──
@@ -521,29 +553,41 @@ class PhotoMuseumApp {
   }
 
   /**
-   * Cast a ray from the right controller and toggle playback on any voice note
-   * sphere hit when the right A button is pressed.
-   * Called each frame only while in the gallery (not the splat world).
+   * Check if any controller tip is touching a voice note sphere and fire
+   * onClick on first contact (same proximity model as the portal button).
+   * Called each frame only while in the gallery and splat world.
    */
   private handleVoiceNoteXRInteraction(): void {
-    const rightGamepad = this.world.input.gamepads.right;
-    if (!rightGamepad?.getButtonDown(InputComponent.A_Button)) return;
-
     const spheres = getVoiceNoteSpheres();
-    if (spheres.length === 0) return;
+    if (spheres.length === 0) {
+      this._touchedVoiceSpheres.clear();
+      return;
+    }
 
-    const raySpace = (this.world.input as any).xrOrigin?.raySpaces?.right;
-    if (!raySpace) return;
+    // Collect all controller/hand tip positions
+    const tips: THREE.Vector3[] = [];
+    const raySpaces = (this.world.input as any).xrOrigin?.raySpaces;
+    if (raySpaces?.left)  tips.push(new THREE.Vector3().setFromMatrixPosition(raySpaces.left.matrixWorld));
+    if (raySpaces?.right) tips.push(new THREE.Vector3().setFromMatrixPosition(raySpaces.right.matrixWorld));
+    const hands = this.world.input.visualAdapters?.hand;
+    if (hands?.left?.connected && hands.left.gripSpace)
+      tips.push(new THREE.Vector3().setFromMatrixPosition(hands.left.gripSpace.matrixWorld));
+    if (hands?.right?.connected && hands.right.gripSpace)
+      tips.push(new THREE.Vector3().setFromMatrixPosition(hands.right.gripSpace.matrixWorld));
 
-    this._xrRayOrigin.setFromMatrixPosition(raySpace.matrixWorld);
-    this._xrRayDir.set(0, 0, -1).applyQuaternion(
-      new THREE.Quaternion().setFromRotationMatrix(raySpace.matrixWorld),
-    );
-    this._xrRaycaster.set(this._xrRayOrigin, this._xrRayDir);
+    const TOUCH_RADIUS = 0.12; // sphere radius 0.06 + 0.06 tolerance
 
-    const hits = this._xrRaycaster.intersectObjects(spheres);
-    if (hits.length > 0) {
-      hits[0].object.userData.onClick?.();
+    for (const sphere of spheres) {
+      const center = new THREE.Vector3().setFromMatrixPosition(sphere.matrixWorld);
+      const isTouching = tips.some(tip => tip.distanceTo(center) < TOUCH_RADIUS);
+
+      if (isTouching && !this._touchedVoiceSpheres.has(sphere)) {
+        // First contact — fire
+        this._touchedVoiceSpheres.add(sphere);
+        sphere.userData.onClick?.();
+      } else if (!isTouching) {
+        this._touchedVoiceSpheres.delete(sphere);
+      }
     }
   }
 
@@ -633,9 +677,14 @@ class PhotoMuseumApp {
             this.enterSplatWorld();
           }
 
-          // Voice note playback: right A button + right controller raycast
+          // Voice note playback: controller touch
           this.handleVoiceNoteXRInteraction();
         } else {
+          // Splat world XR: drawing + voice recording + voice playback all active
+          this.creativeInput?.update(delta, time);
+          updateVoiceNoteFacing(camera);
+          this.handleVoiceNoteXRInteraction();
+
           this.gaussianSplatWorld?.update(delta);
 
           if (this.gaussianSplatWorld?.checkMenuPress()) {
