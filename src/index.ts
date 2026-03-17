@@ -1,11 +1,11 @@
 // src/index.ts
 import { World, Entity } from '@iwsdk/core';
-import { XRInputVisualAdapter, AnimatedController } from '@iwsdk/xr-input';
+import { XRInputVisualAdapter, AnimatedController, InputComponent } from '@iwsdk/xr-input';
 import * as THREE from 'three';
 import { createMuseumRoom } from './components/MuseumRoom';
 import { createPhotoFrame, generateFramePositions, setFramePhoto } from './components/PhotoFrame';
 import { createAnnotation, updateAnnotationFacing, hideAllAnnotations, showAllAnnotations } from './components/Annotation';
-import { createVoiceNote, updateVoiceNoteFacing, hideAllVoiceNotes, showAllVoiceNotes } from './components/VoiceNote';
+import { createVoiceNote, updateVoiceNoteFacing, hideAllVoiceNotes, showAllVoiceNotes, getVoiceNoteSpheres } from './components/VoiceNote';
 import { GoogleAuthService } from './services/googleAuth';
 import { GooglePhotosService, MediaItem } from './services/photosService'
 import { MultiplayerService, RemoteUser } from './services/MultiplayerService';
@@ -46,6 +46,11 @@ class PhotoMuseumApp {
   private _flatRaycaster = new THREE.Raycaster();
   private _screenCenter = new THREE.Vector2(0, 0);
 
+  // XR controller raycaster for voice note interaction
+  private _xrRaycaster = new THREE.Raycaster();
+  private _xrRayDir = new THREE.Vector3();
+  private _xrRayOrigin = new THREE.Vector3();
+
   // Hardcoded portal image (for debugging)
   private readonly PORTAL_IMAGE_URL = '/portal-image.jpg';
   private readonly PORTAL_IMAGE_NAME = 'Portal World';
@@ -62,10 +67,10 @@ class PhotoMuseumApp {
     const container = document.getElementById('scene-container') as HTMLDivElement;
     if (!container) throw new Error('Scene container not found');
 
-    // Inject 'microphone' into XR session features BEFORE World.create()
-    // so the auto-offered session includes mic access. Quest Browser blocks
-    // SpeechRecognition / getUserMedia during immersive sessions without it.
-    injectXRMicrophoneFeature();
+    // Pre-authorize microphone BEFORE the XR session starts. Quest Browser
+    // blocks getUserMedia once an immersive session is active, so we grab the
+    // stream now and hand it to CreativeInputSystem for reuse during VR.
+    const micStream = await preAuthorizeMicrophone();
     patchControllerVisualLoading();
     patchAnimatedControllerInit();
 
@@ -142,7 +147,7 @@ class PhotoMuseumApp {
       // Show invite link in UI
     }
 
-    this.creativeInput = new CreativeInputSystem(this.world, this.multiplayer);
+    this.creativeInput = new CreativeInputSystem(this.world, this.multiplayer, micStream ?? undefined);
 
     // Setup flat mode overlay (detection already ran above before World.create)
     if (isFlatMode) {
@@ -515,6 +520,33 @@ class PhotoMuseumApp {
     }
   }
 
+  /**
+   * Cast a ray from the right controller and toggle playback on any voice note
+   * sphere hit when the right A button is pressed.
+   * Called each frame only while in the gallery (not the splat world).
+   */
+  private handleVoiceNoteXRInteraction(): void {
+    const rightGamepad = this.world.input.gamepads.right;
+    if (!rightGamepad?.getButtonDown(InputComponent.A_Button)) return;
+
+    const spheres = getVoiceNoteSpheres();
+    if (spheres.length === 0) return;
+
+    const raySpace = (this.world.input as any).xrOrigin?.raySpaces?.right;
+    if (!raySpace) return;
+
+    this._xrRayOrigin.setFromMatrixPosition(raySpace.matrixWorld);
+    this._xrRayDir.set(0, 0, -1).applyQuaternion(
+      new THREE.Quaternion().setFromRotationMatrix(raySpace.matrixWorld),
+    );
+    this._xrRaycaster.set(this._xrRayOrigin, this._xrRayDir);
+
+    const hits = this._xrRaycaster.intersectObjects(spheres);
+    if (hits.length > 0) {
+      hits[0].object.userData.onClick?.();
+    }
+  }
+
   private setupFrameHook(): void {
     // Wrap world.update so our per-frame logic runs inside the IWSDK's
     // setAnimationLoop callback — which uses XRSession.requestAnimationFrame
@@ -556,20 +588,29 @@ class PhotoMuseumApp {
           // Raycast interaction: reticle → tap anywhere
           this._flatRaycaster.setFromCamera(this._screenCenter, camera);
 
-          // Reticle hover feedback
+          // Reticle hover feedback — portal button OR voice note sphere
           const buttonMesh = this.portalUI?.getButtonMesh();
+          const voiceSpheresFlat = getVoiceNoteSpheres();
+          let reticleActive = false;
           if (buttonMesh) {
-            const hits = this._flatRaycaster.intersectObject(buttonMesh);
-            this.flatMode.setReticleActive(hits.length > 0);
-          } else {
-            this.flatMode.setReticleActive(false);
+            reticleActive = this._flatRaycaster.intersectObject(buttonMesh).length > 0;
           }
+          if (!reticleActive && voiceSpheresFlat.length > 0) {
+            reticleActive = this._flatRaycaster.intersectObjects(voiceSpheresFlat).length > 0;
+          }
+          this.flatMode.setReticleActive(reticleActive);
 
           const pressed = this.portalUI?.checkRaycastPress(this._flatRaycaster, flatInput.interactPressed);
           if (pressed === 'generate') {
             this.generateSplatWorld();
           } else if (pressed === 'enter') {
             this.enterSplatWorld();
+          }
+
+          // Voice note playback in flat mode
+          if (flatInput.interactPressed && voiceSpheresFlat.length > 0) {
+            const hits = this._flatRaycaster.intersectObjects(voiceSpheresFlat);
+            if (hits.length > 0) hits[0].object.userData.onClick?.();
           }
         } else {
           // Splat world: free-fly + flat input already fed above
@@ -591,6 +632,9 @@ class PhotoMuseumApp {
           } else if (pressed === 'enter') {
             this.enterSplatWorld();
           }
+
+          // Voice note playback: right A button + right controller raycast
+          this.handleVoiceNoteXRInteraction();
         } else {
           this.gaussianSplatWorld?.update(delta);
 
@@ -658,28 +702,22 @@ function patchAnimatedControllerInit(): void {
 }
 
 /**
- * Monkey-patch navigator.xr session methods to include the 'microphone'
- * optional feature. The IWSDK's XRFeatureOptions doesn't expose a microphone
- * field, but Quest Browser requires it for mic access during immersive sessions.
+ * Request microphone access before the XR session starts. Quest Browser blocks
+ * getUserMedia during active immersive sessions, so we obtain the stream early.
+ * The returned MediaStream stays active and is reused for voice note recordings.
  */
-function injectXRMicrophoneFeature(): void {
-  if (!navigator.xr) return;
-
-  const patchInit = (init?: XRSessionInit): XRSessionInit => {
-    init = init || {};
-    const opts = init.optionalFeatures ? [...init.optionalFeatures] : [];
-    if (!opts.includes('microphone')) opts.push('microphone');
-    return { ...init, optionalFeatures: opts };
-  };
-
-  const origRequest = navigator.xr.requestSession.bind(navigator.xr);
-  navigator.xr.requestSession = (mode: XRSessionMode, init?: XRSessionInit) =>
-    origRequest(mode, patchInit(init));
-
-  if ('offerSession' in navigator.xr) {
-    const origOffer = (navigator.xr as any).offerSession.bind(navigator.xr);
-    (navigator.xr as any).offerSession = (mode: string, init?: XRSessionInit) =>
-      origOffer(mode, patchInit(init));
+async function preAuthorizeMicrophone(): Promise<MediaStream | null> {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    console.warn('[Mic] getUserMedia not available on this device');
+    return null;
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    console.log('[Mic] Microphone pre-authorized successfully');
+    return stream;
+  } catch (e) {
+    console.warn('[Mic] Microphone permission denied or unavailable:', e);
+    return null;
   }
 }
 

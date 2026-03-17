@@ -15,7 +15,8 @@ export class CreativeInputSystem {
     private previewSphere!: THREE.Mesh;
     private recordPosition: THREE.Vector3 = new THREE.Vector3();
 
-    // Audio capture
+    // Audio capture — pre-authorized stream obtained before XR session starts
+    private preAuthorizedStream: MediaStream | null = null;
     private mediaStream: MediaStream | null = null;
     private mediaRecorder: MediaRecorder | null = null;
     private audioChunks: Blob[] = [];
@@ -26,9 +27,10 @@ export class CreativeInputSystem {
     private rightTriggerPressed: boolean = false;
     private lastDrawPoint: THREE.Vector3 = new THREE.Vector3();
 
-    constructor(world: World, multiplayer: MultiplayerService) {
+    constructor(world: World, multiplayer: MultiplayerService, preAuthorizedStream?: MediaStream) {
         this.world = world;
         this.multiplayer = multiplayer;
+        this.preAuthorizedStream = preAuthorizedStream ?? null;
         this.initPreviewSphere();
     }
 
@@ -111,25 +113,31 @@ export class CreativeInputSystem {
         this.isRecording = true;
         this.audioChunks = [];
 
-        if (!navigator.mediaDevices?.getUserMedia) {
-            console.warn('getUserMedia not available');
-            this.isRecording = false;
-            return;
-        }
-
         try {
-            this.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            if (!this.isRecording) {
-                this.mediaStream.getTracks().forEach(t => t.stop());
+            // Use pre-authorized stream if available (avoids getUserMedia during XR
+            // session, which Quest Browser blocks). Fall back to fresh request for
+            // non-XR / desktop usage.
+            if (this.preAuthorizedStream && this.preAuthorizedStream.active) {
+                this.mediaStream = this.preAuthorizedStream;
+            } else if (navigator.mediaDevices?.getUserMedia) {
+                this.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                // Cache for future recordings
+                this.preAuthorizedStream = this.mediaStream;
+            } else {
+                console.warn('[Voice] getUserMedia not available');
+                this.isRecording = false;
                 return;
             }
+
+            if (!this.isRecording) return;
+
             this.mediaRecorder = new MediaRecorder(this.mediaStream);
             this.mediaRecorder.ondataavailable = (e) => {
                 if (e.data.size > 0) this.audioChunks.push(e.data);
             };
             this.mediaRecorder.start();
         } catch (e) {
-            console.error('Failed to access microphone:', e);
+            console.error('[Voice] Failed to access microphone:', e);
             this.isRecording = false;
         }
     }
@@ -156,7 +164,11 @@ export class CreativeInputSystem {
     }
 
     private cleanupMic() {
-        this.mediaStream?.getTracks().forEach(t => t.stop());
+        // Don't stop the pre-authorized stream — it's reused across recordings.
+        // Only stop it if it was a fresh one-off stream.
+        if (this.mediaStream && this.mediaStream !== this.preAuthorizedStream) {
+            this.mediaStream.getTracks().forEach(t => t.stop());
+        }
         this.mediaStream = null;
         this.mediaRecorder = null;
         this.audioChunks = [];

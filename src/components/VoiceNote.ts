@@ -9,6 +9,16 @@ export const VoiceNoteComponent = createComponent('VoiceNote', {
 // Track all voice note labels and groups for Y-axis billboard facing and hide/show
 const voiceNoteLabels: Set<THREE.Mesh> = new Set();
 const voiceNoteGroups: Set<THREE.Group> = new Set();
+// Spheres with userData.onClick for raycast interaction
+const voiceNoteSpheres: Set<THREE.Mesh> = new Set();
+
+/** Returns all active voice note spheres (parent still in scene) for raycasting. */
+export function getVoiceNoteSpheres(): THREE.Mesh[] {
+    for (const m of voiceNoteSpheres) {
+        if (!m.parent) voiceNoteSpheres.delete(m);
+    }
+    return [...voiceNoteSpheres];
+}
 
 export function createVoiceNote(
     world: World,
@@ -65,6 +75,7 @@ export function createVoiceNote(
 
     voiceNoteLabels.add(label);
     voiceNoteGroups.add(group);
+    voiceNoteSpheres.add(sphere);
 
     group.position.copy(position);
 
