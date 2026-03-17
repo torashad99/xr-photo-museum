@@ -28,7 +28,7 @@ export class CreativeInputSystem {
     private lastDrawPoint: THREE.Vector3 = new THREE.Vector3();
 
     // Current scene context — tags created items for context-filtered show/hide
-    private context: 'museum' | 'splat' = 'museum';
+    private context: string = 'museum';
 
     constructor(world: World, multiplayer: MultiplayerService, preAuthorizedStream?: MediaStream) {
         this.world = world;
@@ -50,7 +50,7 @@ export class CreativeInputSystem {
         this.world.scene.add(this.previewSphere);
     }
 
-    public setContext(context: 'museum' | 'splat'): void {
+    public setContext(context: string): void {
         this.context = context;
     }
 
@@ -191,7 +191,8 @@ export class CreativeInputSystem {
             const buffer = reader.result as ArrayBuffer;
             this.multiplayer.emitVoiceNote(
                 { x: position.x, y: position.y, z: position.z },
-                buffer
+                buffer,
+                this.context
             );
         };
         reader.readAsArrayBuffer(audioBlob);
@@ -239,7 +240,7 @@ export class CreativeInputSystem {
         } else {
             if (this.rightTriggerPressed) {
                 if (this.activeLine) {
-                    this.multiplayer.emitStroke(this.activeLinePoints, 'black');
+                    this.multiplayer.emitStroke(this.activeLinePoints, 'black', this.context);
                     this.activeLine = null;
                     this.activeLinePoints = [];
                 }

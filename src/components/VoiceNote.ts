@@ -25,7 +25,7 @@ export function createVoiceNote(
     world: World,
     position: THREE.Vector3,
     audioUrl: string,
-    context: 'museum' | 'splat' = 'museum',
+    context: string = 'museum',
 ): Entity {
     const group = new THREE.Group();
     const entity = world.createTransformEntity(group);
@@ -145,7 +145,7 @@ export function showAllVoiceNotes(): void {
     }
 }
 
-export function showVoiceNotesInContext(context: 'museum' | 'splat'): void {
+export function showVoiceNotesInContext(context: string): void {
     for (const group of voiceNoteGroups) {
         if (group.parent) group.visible = group.userData.context === context;
     }

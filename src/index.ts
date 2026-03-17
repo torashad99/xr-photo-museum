@@ -25,6 +25,7 @@ class PhotoMuseumApp {
   private remoteAvatars: Map<string, THREE.Object3D> = new Map();
   private creativeInput: CreativeInputSystem | null = null;
   private inSplatWorld: boolean = false;
+  private currentSplatContext: string | null = null;
 
   // Portal / Splat world
   private portalFrame: PortalFrameHandle | null = null;
@@ -242,20 +243,25 @@ class PhotoMuseumApp {
       createVoiceNote(
         this.world,
         new THREE.Vector3(data.position.x, data.position.y, data.position.z),
-        audioUrl
+        audioUrl,
+        data.context || 'museum'
       );
+      // Re-filter so newly-arrived remote items match the viewer's current context
+      showVoiceNotesInContext(this.currentSplatContext || 'museum');
     });
 
     this.multiplayer.setOnStrokeAdded((stroke) => {
       // Recreate remote stroke
       const firstPoint = new THREE.Vector3(stroke.points[0].x, stroke.points[0].y, stroke.points[0].z);
-      const { line, points } = startStroke(this.world, stroke.color, firstPoint);
+      const { line, points } = startStroke(this.world, stroke.color, firstPoint, stroke.context || 'museum');
 
       // Add rest of points
       for (let i = 1; i < stroke.points.length; i++) {
         const p = new THREE.Vector3(stroke.points[i].x, stroke.points[i].y, stroke.points[i].z);
         addPointToStroke(line, p, points);
       }
+      // Re-filter so newly-arrived remote items match the viewer's current context
+      showDrawingsInContext(this.currentSplatContext || 'museum');
     });
   }
 
@@ -347,8 +353,9 @@ class PhotoMuseumApp {
   }
 
   /** Phase 2: Load the cached splat and enter the world. */
-  private async enterSplatWorld(): Promise<void> {
+  private async enterSplatWorld(splatContext?: string): Promise<void> {
     if (!this.portalUI || !this.cachedSplatResult) return;
+    const ctx = splatContext ?? `splat:${this.PORTAL_IMAGE_URL}`;
 
     const result = this.cachedSplatResult;
 
@@ -375,11 +382,12 @@ class PhotoMuseumApp {
 
       // Hide museum drawings and voice notes; splat ones will be shown as they're created
       hideAllAnnotations();
-      showVoiceNotesInContext('splat'); // hides museum, shows splat (initially empty)
-      showDrawingsInContext('splat');   // hides museum, shows splat (initially empty)
+      showVoiceNotesInContext(ctx); // hides museum, shows this splat (initially empty)
+      showDrawingsInContext(ctx);   // hides museum, shows this splat (initially empty)
+      this.currentSplatContext = ctx;
 
       // Switch creative input to splat context so new items are tagged correctly
-      this.creativeInput?.setContext('splat');
+      this.creativeInput?.setContext(ctx);
 
       // Load splat
       this.gaussianSplatWorld = new GaussianSplatWorld(this.world);
@@ -440,6 +448,7 @@ class PhotoMuseumApp {
 
     // Switch creative input back to museum context
     this.creativeInput?.setContext('museum');
+    this.currentSplatContext = null;
 
     // Re-create portal UI — splat is cached now so go straight to "Enter World"
     const framePositions = generateFramePositions(18);

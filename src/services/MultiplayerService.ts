@@ -18,7 +18,7 @@ export class MultiplayerService {
   private onUserMoved: ((userId: string, pos: THREE.Vector3, rot: THREE.Quaternion) => void) | null = null;
   private onPhotosUpdated: ((photos: any[]) => void) | null = null;
   private onAnnotationAdded: ((annotation: any) => void) | null = null;
-  private onVoiceNoteAdded: ((data: { position: { x: number, y: number, z: number }, audioData: ArrayBuffer }) => void) | null = null;
+  private onVoiceNoteAdded: ((data: { position: { x: number, y: number, z: number }, audioData: ArrayBuffer, context?: string }) => void) | null = null;
 
   constructor() {
     this.socket = io();
@@ -126,10 +126,11 @@ export class MultiplayerService {
     });
   }
 
-  emitStroke(points: THREE.Vector3[], color: string): void {
+  emitStroke(points: THREE.Vector3[], color: string, context: string = 'museum'): void {
     this.socket.emit('addStroke', {
       points: points.map(p => ({ x: p.x, y: p.y, z: p.z })),
-      color
+      color,
+      context
     });
   }
 
@@ -154,16 +155,16 @@ export class MultiplayerService {
     this.onAnnotationAdded = callback;
   }
 
-  private onStrokeAdded: ((stroke: { points: { x: number, y: number, z: number }[], color: string }) => void) | null = null;
-  setOnStrokeAdded(callback: (stroke: { points: { x: number, y: number, z: number }[], color: string }) => void): void {
+  private onStrokeAdded: ((stroke: { points: { x: number, y: number, z: number }[], color: string, context?: string }) => void) | null = null;
+  setOnStrokeAdded(callback: (stroke: { points: { x: number, y: number, z: number }[], color: string, context?: string }) => void): void {
     this.onStrokeAdded = callback;
   }
 
-  emitVoiceNote(position: { x: number, y: number, z: number }, audioData: ArrayBuffer): void {
-    this.socket.emit('addVoiceNote', { position, audioData });
+  emitVoiceNote(position: { x: number, y: number, z: number }, audioData: ArrayBuffer, context: string = 'museum'): void {
+    this.socket.emit('addVoiceNote', { position, audioData, context });
   }
 
-  setOnVoiceNoteAdded(callback: (data: { position: { x: number, y: number, z: number }, audioData: ArrayBuffer }) => void): void {
+  setOnVoiceNoteAdded(callback: (data: { position: { x: number, y: number, z: number }, audioData: ArrayBuffer, context?: string }) => void): void {
     this.onVoiceNoteAdded = callback;
   }
 
