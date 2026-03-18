@@ -24,7 +24,8 @@ const io = new Server(httpServer, {
   cors: {
     origin: "*",
     methods: ["GET", "POST"]
-  }
+  },
+  maxHttpBufferSize: 5e6  // 5MB for voice note binary payloads
 });
 
 app.use(express.json());
@@ -284,12 +285,32 @@ app.get(/.*/, (req, res) => {
   res.sendFile(join(__dirname, '../dist/index.html'));
 });
 
+interface StrokeData {
+  id: string;
+  userId: string;
+  points: { x: number; y: number; z: number }[];
+  color: string;
+  context: string;
+  timestamp: number;
+}
+
+interface VoiceNoteData {
+  id: string;
+  userId: string;
+  position: { x: number; y: number; z: number };
+  audioData: Buffer;
+  context: string;
+  timestamp: number;
+}
+
 interface Room {
   id: string;
   ownerId: string;
   users: Map<string, UserState>;
   photos: PhotoState[];
   annotations: Annotation[];
+  drawings: StrokeData[];
+  voiceNotes: VoiceNoteData[];
 }
 
 interface UserState {
@@ -297,6 +318,7 @@ interface UserState {
   username: string;
   position: { x: number; y: number; z: number };
   rotation: { x: number; y: number; z: number; w: number };
+  context: string;
 }
 
 interface PhotoState {
@@ -335,10 +357,7 @@ function generatePassphrase(): string {
   return `${word1}-${word2}`;
 }
 
-// Generate invite link
-function generateInviteLink(roomId: string): string {
-  return `${process.env.BASE_URL || 'https://localhost:8081'}?room=${roomId}`;
-}
+// Invite link is now built client-side using window.location.origin
 
 io.on('connection', (socket: Socket) => {
   console.log('User connected:', socket.id);
@@ -353,14 +372,17 @@ io.on('connection', (socket: Socket) => {
       ownerId: userId,
       users: new Map(),
       photos: [],
-      annotations: []
+      annotations: [],
+      drawings: [],
+      voiceNotes: []
     };
 
     room.users.set(userId, {
       id: userId,
       username: data.username,
       position: { x: 0, y: 1.6, z: 0 },
-      rotation: { x: 0, y: 0, z: 0, w: 1 }
+      rotation: { x: 0, y: 0, z: 0, w: 1 },
+      context: 'museum'
     });
 
     rooms.set(roomId, room);
@@ -370,7 +392,6 @@ io.on('connection', (socket: Socket) => {
     callback({
       success: true,
       roomId,
-      inviteLink: generateInviteLink(roomId),
       userId
     });
   });
@@ -388,7 +409,8 @@ io.on('connection', (socket: Socket) => {
       id: userId,
       username: data.username,
       position: { x: 0, y: 1.6, z: 0 },
-      rotation: { x: 0, y: 0, z: 0, w: 1 }
+      rotation: { x: 0, y: 0, z: 0, w: 1 },
+      context: 'museum'
     });
 
     socket.join(data.roomId);
@@ -406,7 +428,12 @@ io.on('connection', (socket: Socket) => {
       userId,
       currentUsers: Array.from(room.users.values()),
       photos: room.photos,
-      annotations: room.annotations
+      annotations: room.annotations,
+      drawings: room.drawings,
+      voiceNotes: room.voiceNotes.map(vn => ({
+        ...vn,
+        audioData: vn.audioData  // Buffer is binary-compatible with Socket.IO
+      }))
     });
   });
 
@@ -414,6 +441,7 @@ io.on('connection', (socket: Socket) => {
   socket.on('updatePosition', (data: {
     position: { x: number; y: number; z: number };
     rotation: { x: number; y: number; z: number; w: number };
+    context?: string;
   }) => {
     if (!currentRoomId) return;
 
@@ -424,11 +452,13 @@ io.on('connection', (socket: Socket) => {
     if (user) {
       user.position = data.position;
       user.rotation = data.rotation;
+      user.context = data.context || 'museum';
 
       socket.to(currentRoomId).emit('userMoved', {
         userId,
         position: data.position,
-        rotation: data.rotation
+        rotation: data.rotation,
+        context: user.context
       });
     }
   });
@@ -461,10 +491,49 @@ io.on('connection', (socket: Socket) => {
     }
   });
 
-  // Relay voice notes to other users in the room
-  socket.on('addVoiceNote', (data: { position: { x: number; y: number; z: number }; audioData: ArrayBuffer }) => {
+  // Relay and store drawing strokes
+  socket.on('addStroke', (data: { points: { x: number; y: number; z: number }[]; color: string; context?: string }) => {
     if (!currentRoomId) return;
-    socket.to(currentRoomId).emit('voiceNoteAdded', data);
+    const room = rooms.get(currentRoomId);
+    if (room) {
+      const stroke: StrokeData = {
+        id: uuidv4(),
+        userId,
+        points: data.points,
+        color: data.color,
+        context: data.context || 'museum',
+        timestamp: Date.now()
+      };
+      room.drawings.push(stroke);
+      socket.to(currentRoomId).emit('strokeAdded', stroke);
+    }
+  });
+
+  // Relay and store voice notes
+  const MAX_VOICE_NOTES_PER_ROOM = 50;
+  socket.on('addVoiceNote', (data: { position: { x: number; y: number; z: number }; audioData: ArrayBuffer; context?: string }) => {
+    if (!currentRoomId) return;
+    const room = rooms.get(currentRoomId);
+    if (room) {
+      const voiceNote: VoiceNoteData = {
+        id: uuidv4(),
+        userId,
+        position: data.position,
+        audioData: Buffer.from(data.audioData),
+        context: data.context || 'museum',
+        timestamp: Date.now()
+      };
+      room.voiceNotes.push(voiceNote);
+      // Drop oldest if over limit
+      if (room.voiceNotes.length > MAX_VOICE_NOTES_PER_ROOM) {
+        room.voiceNotes.shift();
+      }
+      socket.to(currentRoomId).emit('voiceNoteAdded', {
+        position: data.position,
+        audioData: data.audioData,
+        context: data.context || 'museum'
+      });
+    }
   });
 
   // Handle disconnect

@@ -7,6 +7,7 @@ export interface RemoteUser {
   username: string;
   position: THREE.Vector3;
   rotation: THREE.Quaternion;
+  context: string;  // 'museum' | splat context string
   avatar?: THREE.Object3D;
 }
 
@@ -15,10 +16,12 @@ export class MultiplayerService {
   private remoteUsers: Map<string, RemoteUser> = new Map();
   private onUserJoined: ((user: RemoteUser) => void) | null = null;
   private onUserLeft: ((userId: string) => void) | null = null;
-  private onUserMoved: ((userId: string, pos: THREE.Vector3, rot: THREE.Quaternion) => void) | null = null;
+  private onUserMoved: ((userId: string, pos: THREE.Vector3, rot: THREE.Quaternion, context: string) => void) | null = null;
   private onPhotosUpdated: ((photos: any[]) => void) | null = null;
   private onAnnotationAdded: ((annotation: any) => void) | null = null;
   private onVoiceNoteAdded: ((data: { position: { x: number, y: number, z: number }, audioData: ArrayBuffer, context?: string }) => void) | null = null;
+  private lastPositionUpdate: number = 0;
+  private readonly POSITION_THROTTLE_MS = 50; // 20 updates/sec
 
   constructor() {
     this.socket = io();
@@ -31,7 +34,8 @@ export class MultiplayerService {
         id: data.userId,
         username: data.username,
         position: new THREE.Vector3(0, 1.6, 0),
-        rotation: new THREE.Quaternion()
+        rotation: new THREE.Quaternion(),
+        context: 'museum'
       };
       this.remoteUsers.set(data.userId, user);
       this.onUserJoined?.(user);
@@ -47,7 +51,8 @@ export class MultiplayerService {
       if (user) {
         user.position.set(data.position.x, data.position.y, data.position.z);
         user.rotation.set(data.rotation.x, data.rotation.y, data.rotation.z, data.rotation.w);
-        this.onUserMoved?.(data.userId, user.position, user.rotation);
+        user.context = data.context || 'museum';
+        this.onUserMoved?.(data.userId, user.position, user.rotation, user.context);
       }
     });
 
@@ -68,14 +73,11 @@ export class MultiplayerService {
     });
   }
 
-  async createRoom(username: string): Promise<{ roomId: string; inviteLink: string }> {
+  async createRoom(username: string): Promise<{ roomId: string }> {
     return new Promise((resolve, reject) => {
       this.socket.emit('createRoom', { username }, (response: any) => {
         if (response.success) {
-          resolve({
-            roomId: response.roomId,
-            inviteLink: response.inviteLink
-          });
+          resolve({ roomId: response.roomId });
         } else {
           reject(new Error(response.error));
         }
@@ -94,7 +96,8 @@ export class MultiplayerService {
                 id: user.id,
                 username: user.username,
                 position: new THREE.Vector3(user.position.x, user.position.y, user.position.z),
-                rotation: new THREE.Quaternion(user.rotation.x, user.rotation.y, user.rotation.z, user.rotation.w)
+                rotation: new THREE.Quaternion(user.rotation.x, user.rotation.y, user.rotation.z, user.rotation.w),
+                context: user.context || 'museum'
               });
             }
           });
@@ -106,10 +109,14 @@ export class MultiplayerService {
     });
   }
 
-  updatePosition(position: THREE.Vector3, rotation: THREE.Quaternion): void {
+  updatePosition(position: THREE.Vector3, rotation: THREE.Quaternion, context: string = 'museum'): void {
+    const now = performance.now();
+    if (now - this.lastPositionUpdate < this.POSITION_THROTTLE_MS) return;
+    this.lastPositionUpdate = now;
     this.socket.emit('updatePosition', {
       position: { x: position.x, y: position.y, z: position.z },
-      rotation: { x: rotation.x, y: rotation.y, z: rotation.z, w: rotation.w }
+      rotation: { x: rotation.x, y: rotation.y, z: rotation.z, w: rotation.w },
+      context
     });
   }
 
@@ -143,7 +150,7 @@ export class MultiplayerService {
     this.onUserLeft = callback;
   }
 
-  setOnUserMoved(callback: (userId: string, pos: THREE.Vector3, rot: THREE.Quaternion) => void): void {
+  setOnUserMoved(callback: (userId: string, pos: THREE.Vector3, rot: THREE.Quaternion, context: string) => void): void {
     this.onUserMoved = callback;
   }
 

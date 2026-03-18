@@ -34,6 +34,9 @@ class PhotoMuseumApp {
   private worldLabsService: WorldLabsService = new WorldLabsService();
   private cachedSplatResult: SplatResult | null = null;
 
+  // Invite link display mesh on the green wall
+  private inviteLinkMesh: THREE.Mesh | null = null;
+
   // Museum entities for hide/show
   private roomEntity: Entity | null = null;
   private floorEntity: Entity | null = null;
@@ -46,6 +49,10 @@ class PhotoMuseumApp {
   private flatPosition = new THREE.Vector3(0, 1.6, 0);
   private _flatRaycaster = new THREE.Raycaster();
   private _screenCenter = new THREE.Vector2(0, 0);
+
+  // Reusable world-space position/rotation temporaries (avoids per-frame allocation)
+  private _worldPos = new THREE.Vector3();
+  private _worldQuat = new THREE.Quaternion();
 
   // XR controller raycaster for voice note interaction
   private _xrRaycaster = new THREE.Raycaster();
@@ -143,11 +150,37 @@ class PhotoMuseumApp {
     const username = urlUsername || 'User_' + Math.random().toString(36).substring(2, 7);
 
     if (roomId) {
-      await this.multiplayer.joinRoom(roomId, username);
+      const joinResponse = await this.multiplayer.joinRoom(roomId, username);
+      // Create avatars for users already in the room when we joined
+      for (const [id, user] of this.multiplayer.getRemoteUsers()) {
+        if (!this.remoteAvatars.has(id)) {
+          const avatar = this.createAvatar(user.username);
+          avatar.position.copy(user.position);
+          avatar.quaternion.copy(user.rotation);
+          this.remoteAvatars.set(id, avatar);
+          this.world.scene.add(avatar);
+        }
+      }
+      // Replay drawings and voice notes that existed before we joined
+      if (joinResponse.drawings) {
+        for (const stroke of joinResponse.drawings) {
+          this.replayStroke(stroke);
+        }
+      }
+      if (joinResponse.voiceNotes) {
+        for (const vn of joinResponse.voiceNotes) {
+          const audioBlob = new Blob([vn.audioData], { type: 'audio/webm' });
+          const audioUrl = URL.createObjectURL(audioBlob);
+          createVoiceNote(this.world, new THREE.Vector3(vn.position.x, vn.position.y, vn.position.z), audioUrl, vn.context || 'museum');
+        }
+      }
+      // Show invite link on green wall so the joining user can share further
+      this.createInviteLinkDisplay(roomId);
     } else {
-      const { inviteLink } = await this.multiplayer.createRoom(username);
+      const { roomId: newRoomId } = await this.multiplayer.createRoom(username);
+      const inviteLink = `${window.location.origin}?room=${newRoomId}`;
       console.log('Share this invite link:', inviteLink);
-      // Show invite link in UI
+      this.createInviteLinkDisplay(newRoomId);
     }
 
     this.creativeInput = new CreativeInputSystem(this.world, this.multiplayer, micStream ?? undefined);
@@ -219,11 +252,14 @@ class PhotoMuseumApp {
       }
     });
 
-    this.multiplayer.setOnUserMoved((userId, position, rotation) => {
+    this.multiplayer.setOnUserMoved((userId, position, rotation, context) => {
       const avatar = this.remoteAvatars.get(userId);
       if (avatar) {
         avatar.position.copy(position);
         avatar.quaternion.copy(rotation);
+        // Show avatar only when in the same world context as this local user
+        const localContext = this.currentSplatContext || 'museum';
+        avatar.visible = (context === localContext);
       }
     });
 
@@ -251,55 +287,146 @@ class PhotoMuseumApp {
     });
 
     this.multiplayer.setOnStrokeAdded((stroke) => {
-      // Recreate remote stroke
-      const firstPoint = new THREE.Vector3(stroke.points[0].x, stroke.points[0].y, stroke.points[0].z);
-      const { line, points } = startStroke(this.world, stroke.color, firstPoint, stroke.context || 'museum');
-
-      // Add rest of points
-      for (let i = 1; i < stroke.points.length; i++) {
-        const p = new THREE.Vector3(stroke.points[i].x, stroke.points[i].y, stroke.points[i].z);
-        addPointToStroke(line, p, points);
-      }
-      // Re-filter so newly-arrived remote items match the viewer's current context
+      this.replayStroke(stroke);
       showDrawingsInContext(this.currentSplatContext || 'museum');
     });
   }
 
   private createAvatar(username: string): THREE.Object3D {
     const group = new THREE.Group();
+    // group.position is set to the camera's world position (eye level).
+    // All child offsets are relative to that eye-level origin.
 
-    // Simple avatar: head
+    // Head — centered at eye level (y=0 relative to group)
     const headGeometry = new THREE.SphereGeometry(0.2, 16, 16);
     const headMaterial = new THREE.MeshStandardMaterial({ color: 0x00ff00 });
     const head = new THREE.Mesh(headGeometry, headMaterial);
-    head.position.y = 1.6;
+    head.position.y = 0;
     group.add(head);
 
-    // Body
+    // Body — below the head
     const bodyGeometry = new THREE.CylinderGeometry(0.15, 0.2, 0.8, 8);
     const bodyMaterial = new THREE.MeshStandardMaterial({ color: 0x0000ff });
     const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
-    body.position.y = 1.1;
+    body.position.y = -0.6;
     group.add(body);
 
-    // Name tag
+    // Name tag — above head. Use PlaneGeometry Mesh (not Sprite) for proper
+    // Y-axis-only billboarding in VR (Sprite does full spherical billboard and tilts).
     const canvas = document.createElement('canvas');
-    const context = canvas.getContext('2d')!;
+    const ctx2d = canvas.getContext('2d')!;
     canvas.width = 256;
     canvas.height = 64;
-    context.fillStyle = '#ffffff';
-    context.font = 'bold 32px Arial';
-    context.textAlign = 'center';
-    context.fillText(username, 128, 40);
+    ctx2d.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx2d.fillRect(0, 0, 256, 64);
+    ctx2d.fillStyle = '#ffffff';
+    ctx2d.font = 'bold 32px Arial';
+    ctx2d.textAlign = 'center';
+    ctx2d.fillText(username, 128, 44);
 
     const texture = new THREE.CanvasTexture(canvas);
-    const spriteMaterial = new THREE.SpriteMaterial({ map: texture });
-    const nameTag = new THREE.Sprite(spriteMaterial);
-    nameTag.scale.set(0.5, 0.125, 1);
-    nameTag.position.y = 2;
+    const tagMat = new THREE.MeshBasicMaterial({ map: texture, transparent: true, side: THREE.DoubleSide, depthWrite: false });
+    const nameTag = new THREE.Mesh(new THREE.PlaneGeometry(0.6, 0.15), tagMat);
+    nameTag.position.y = 0.38;
     group.add(nameTag);
 
     return group;
+  }
+
+  /** Billboard all name tags to face the camera on Y-axis only. */
+  private updateNameTagFacing(camera: THREE.Camera): void {
+    const camWorldPos = new THREE.Vector3();
+    camera.getWorldPosition(camWorldPos);
+
+    const parentWorldQuat = new THREE.Quaternion();
+    const targetWorldQuat = new THREE.Quaternion();
+
+    for (const avatar of this.remoteAvatars.values()) {
+      if (!avatar.visible) continue;
+      // The name tag is the third child (index 2)
+      const nameTag = avatar.children[2] as THREE.Mesh;
+      if (!nameTag) continue;
+
+      const tagWorldPos = new THREE.Vector3();
+      nameTag.getWorldPosition(tagWorldPos);
+
+      // Desired world-space Y rotation to face camera
+      const dx = camWorldPos.x - tagWorldPos.x;
+      const dz = camWorldPos.z - tagWorldPos.z;
+      targetWorldQuat.setFromEuler(new THREE.Euler(0, Math.atan2(dx, dz), 0));
+
+      // Convert to local quaternion: localQuat = parentWorldQuat^-1 * targetWorldQuat
+      // This cancels out whatever rotation the avatar group contributes.
+      avatar.getWorldQuaternion(parentWorldQuat);
+      parentWorldQuat.invert();
+      nameTag.quaternion.copy(parentWorldQuat).multiply(targetWorldQuat);
+    }
+  }
+
+  /** Show/hide all remote avatars based on whether they share the local user's context. */
+  private updateAvatarVisibilityForContext(): void {
+    const localContext = this.currentSplatContext || 'museum';
+    for (const [id, user] of this.multiplayer.getRemoteUsers()) {
+      const avatar = this.remoteAvatars.get(id);
+      if (avatar) {
+        avatar.visible = (user.context === localContext);
+      }
+    }
+  }
+
+  private replayStroke(stroke: { points: { x: number; y: number; z: number }[]; color: string; context?: string }): void {
+    if (!stroke.points || stroke.points.length === 0) return;
+    const firstPoint = new THREE.Vector3(stroke.points[0].x, stroke.points[0].y, stroke.points[0].z);
+    const { line, points } = startStroke(this.world, stroke.color, firstPoint, stroke.context || 'museum');
+    for (let i = 1; i < stroke.points.length; i++) {
+      const p = new THREE.Vector3(stroke.points[i].x, stroke.points[i].y, stroke.points[i].z);
+      addPointToStroke(line, p, points);
+    }
+  }
+
+  private createInviteLinkDisplay(roomId: string): void {
+    // Build the invite URL using the current origin (works on localhost AND any network/hosted URL)
+    const inviteLink = `${window.location.origin}?room=${roomId}`;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 1024;
+    canvas.height = 256;
+    const ctx = canvas.getContext('2d')!;
+
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 32px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('Invite others to join:', canvas.width / 2, 50);
+
+    // Room code large and green
+    ctx.fillStyle = '#00ff88';
+    ctx.font = 'bold 72px monospace';
+    ctx.fillText(roomId, canvas.width / 2, 148);
+
+    // Full URL smaller
+    ctx.fillStyle = '#cccccc';
+    ctx.font = '26px Arial';
+    ctx.fillText(inviteLink, canvas.width / 2, 210);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    const geometry = new THREE.PlaneGeometry(5, 1.25);
+    const material = new THREE.MeshBasicMaterial({
+      map: texture,
+      transparent: true,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const mesh = new THREE.Mesh(geometry, material);
+
+    // Green wall is front wall at z=10, facing -Z into the room
+    mesh.position.set(0, 4.0, 9.94);
+    mesh.rotation.set(0, Math.PI, 0);
+
+    this.world.scene.add(mesh);
+    this.inviteLinkMesh = mesh;
   }
 
   public async loadUserPhotos(): Promise<void> {
@@ -380,10 +507,11 @@ class PhotoMuseumApp {
         }
       }
 
-      // Hide museum drawings and voice notes; splat ones will be shown as they're created
+      // Hide museum drawings, voice notes, and invite link; splat ones will be shown as they're created
       hideAllAnnotations();
       showVoiceNotesInContext(ctx); // hides museum, shows this splat (initially empty)
       showDrawingsInContext(ctx);   // hides museum, shows this splat (initially empty)
+      if (this.inviteLinkMesh) this.inviteLinkMesh.visible = false;
       this.currentSplatContext = ctx;
 
       // Switch creative input to splat context so new items are tagged correctly
@@ -408,6 +536,7 @@ class PhotoMuseumApp {
       for (const sys of this.getLocomotionSystemsToStop()) sys.stop();
 
       this.inSplatWorld = true;
+      this.updateAvatarVisibilityForContext();
 
       // Show "Return to Museum" button and vertical buttons in flat mode
       this.flatMode?.setReturnButtonVisible(true);
@@ -441,10 +570,11 @@ class PhotoMuseumApp {
     }
     if (this.portalFrame) this.portalFrame.group.visible = true;
 
-    // Restore museum drawings, annotations, and voice notes; hide splat ones
+    // Restore museum drawings, annotations, voice notes, and invite link; hide splat ones
     showAllAnnotations();
     showVoiceNotesInContext('museum');
     showDrawingsInContext('museum');
+    if (this.inviteLinkMesh) this.inviteLinkMesh.visible = true;
 
     // Switch creative input back to museum context
     this.creativeInput?.setContext('museum');
@@ -474,6 +604,7 @@ class PhotoMuseumApp {
     }
 
     this.inSplatWorld = false;
+    this.updateAvatarVisibilityForContext();
 
     // Hide "Return to Museum" button and vertical buttons in flat mode
     this.flatMode?.setReturnButtonVisible(false);
@@ -632,9 +763,12 @@ class PhotoMuseumApp {
 
         // ── Common frame logic (shared between flat and XR) ──
         if (!this.inSplatWorld) {
-          this.multiplayer.updatePosition(camera.position, camera.quaternion);
+          camera.getWorldPosition(this._worldPos);
+          camera.getWorldQuaternion(this._worldQuat);
+          this.multiplayer.updatePosition(this._worldPos, this._worldQuat, this.currentSplatContext || 'museum');
           updateAnnotationFacing(camera);
           updateVoiceNoteFacing(camera);
+          this.updateNameTagFacing(camera);
           this.portalFrame?.updateParallax(camera);
           this.portalUI?.updateCountdown();
 
@@ -667,15 +801,37 @@ class PhotoMuseumApp {
           }
         } else {
           // Splat world: free-fly + flat input already fed above
+          // Still broadcast position so remote users see this user moving in the splat world
+          camera.getWorldPosition(this._worldPos);
+          camera.getWorldQuaternion(this._worldQuat);
+          this.multiplayer.updatePosition(this._worldPos, this._worldQuat, this.currentSplatContext || 'museum');
+          updateVoiceNoteFacing(camera);
+          this.updateNameTagFacing(camera);
+
+          // Voice note raycast + reticle in splat world (same as museum branch)
+          this._flatRaycaster.setFromCamera(this._screenCenter, camera);
+          const voiceSpheresSplat = getVoiceNoteSpheres();
+          const reticleActiveSplat = voiceSpheresSplat.length > 0 &&
+            this._flatRaycaster.intersectObjects(voiceSpheresSplat).length > 0;
+          this.flatMode.setReticleActive(reticleActiveSplat);
+
+          if (flatInput.interactPressed && voiceSpheresSplat.length > 0) {
+            const hits = this._flatRaycaster.intersectObjects(voiceSpheresSplat);
+            if (hits.length > 0) hits[0].object.userData.onClick?.();
+          }
+
           this.gaussianSplatWorld?.update(delta);
         }
       } else {
         // ── XR mode (original behavior) ──
         if (!this.inSplatWorld) {
-          this.multiplayer.updatePosition(camera.position, camera.quaternion);
+          camera.getWorldPosition(this._worldPos);
+          camera.getWorldQuaternion(this._worldQuat);
+          this.multiplayer.updatePosition(this._worldPos, this._worldQuat, this.currentSplatContext || 'museum');
           this.creativeInput?.update(delta, time);
           updateAnnotationFacing(camera);
           updateVoiceNoteFacing(camera);
+          this.updateNameTagFacing(camera);
           this.portalFrame?.updateParallax(camera);
           this.portalUI?.updateCountdown();
 
@@ -690,8 +846,13 @@ class PhotoMuseumApp {
           this.handleVoiceNoteXRInteraction();
         } else {
           // Splat world XR: drawing + voice recording + voice playback all active
+          // Still broadcast position so remote users see this user in the splat world
+          camera.getWorldPosition(this._worldPos);
+          camera.getWorldQuaternion(this._worldQuat);
+          this.multiplayer.updatePosition(this._worldPos, this._worldQuat, this.currentSplatContext || 'museum');
           this.creativeInput?.update(delta, time);
           updateVoiceNoteFacing(camera);
+          this.updateNameTagFacing(camera);
           this.handleVoiceNoteXRInteraction();
 
           this.gaussianSplatWorld?.update(delta);
