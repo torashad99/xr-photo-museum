@@ -23,6 +23,16 @@ class PhotoMuseumApp {
   private photosService: GooglePhotosService | null = null;
   private multiplayer: MultiplayerService;
   private remoteAvatars: Map<string, THREE.Object3D> = new Map();
+  private static AVATAR_COLORS = [
+    0x4FC3F7, // light blue
+    0xE57373, // red
+    0x81C784, // green
+    0xFFB74D, // orange
+    0xBA68C8, // purple
+    0x4DB6AC, // teal
+    0xF06292, // pink
+    0xAED581, // lime
+  ];
   private creativeInput: CreativeInputSystem | null = null;
   private inSplatWorld: boolean = false;
   private currentSplatContext: string | null = null;
@@ -154,7 +164,7 @@ class PhotoMuseumApp {
       // Create avatars for users already in the room when we joined
       for (const [id, user] of this.multiplayer.getRemoteUsers()) {
         if (!this.remoteAvatars.has(id)) {
-          const avatar = this.createAvatar(user.username);
+          const avatar = this.createAvatar(user.colorIndex, user.username);
           avatar.position.copy(user.position);
           avatar.quaternion.copy(user.rotation);
           this.remoteAvatars.set(id, avatar);
@@ -238,7 +248,7 @@ class PhotoMuseumApp {
 
   private setupMultiplayerCallbacks(): void {
     this.multiplayer.setOnUserJoined((user: RemoteUser) => {
-      const avatar = this.createAvatar(user.username);
+      const avatar = this.createAvatar(user.colorIndex, user.username);
       avatar.position.copy(user.position);
       this.remoteAvatars.set(user.id, avatar);
       this.world.scene.add(avatar);
@@ -292,26 +302,31 @@ class PhotoMuseumApp {
     });
   }
 
-  private createAvatar(username: string): THREE.Object3D {
+  private createAvatar(colorIndex: number, username: string): THREE.Object3D {
     const group = new THREE.Group();
     // group.position is set to the camera's world position (eye level).
-    // All child offsets are relative to that eye-level origin.
+    // group.quaternion tracks the remote user's camera rotation, so the capsule
+    // naturally faces the direction they are looking.
 
-    // Head — centered at eye level (y=0 relative to group)
-    const headGeometry = new THREE.SphereGeometry(0.2, 16, 16);
-    const headMaterial = new THREE.MeshStandardMaterial({ color: 0x00ff00 });
-    const head = new THREE.Mesh(headGeometry, headMaterial);
-    head.position.y = 0;
-    group.add(head);
+    // Capsule body — server-assigned unique color per user, hangs below eye level
+    const color = PhotoMuseumApp.AVATAR_COLORS[colorIndex % PhotoMuseumApp.AVATAR_COLORS.length];
+    const capsuleGeometry = new THREE.CapsuleGeometry(0.15, 0.5, 8, 16);
+    const capsuleMaterial = new THREE.MeshStandardMaterial({ color });
+    const capsule = new THREE.Mesh(capsuleGeometry, capsuleMaterial);
+    capsule.position.y = 0;
+    group.add(capsule); // children[0]
 
-    // Body — below the head
-    const bodyGeometry = new THREE.CylinderGeometry(0.15, 0.2, 0.8, 8);
-    const bodyMaterial = new THREE.MeshStandardMaterial({ color: 0x0000ff });
-    const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
-    body.position.y = -0.6;
-    group.add(body);
+    // Eyes — black spheres on the front face of the capsule to show gaze direction
+    const eyeGeometry = new THREE.SphereGeometry(0.04, 8, 8);
+    const eyeMaterial = new THREE.MeshBasicMaterial({ color: 0x000000 });
+    const leftEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
+    leftEye.position.set(-0.06, 0.05, -0.14);
+    capsule.add(leftEye);
+    const rightEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
+    rightEye.position.set(0.06, 0.05, -0.14);
+    capsule.add(rightEye);
 
-    // Name tag — above head. Use PlaneGeometry Mesh (not Sprite) for proper
+    // Name tag — above eye level. Use PlaneGeometry Mesh (not Sprite) for proper
     // Y-axis-only billboarding in VR (Sprite does full spherical billboard and tilts).
     const canvas = document.createElement('canvas');
     const ctx2d = canvas.getContext('2d')!;
@@ -327,8 +342,8 @@ class PhotoMuseumApp {
     const texture = new THREE.CanvasTexture(canvas);
     const tagMat = new THREE.MeshBasicMaterial({ map: texture, transparent: true, side: THREE.DoubleSide, depthWrite: false });
     const nameTag = new THREE.Mesh(new THREE.PlaneGeometry(0.6, 0.15), tagMat);
-    nameTag.position.y = 0.38;
-    group.add(nameTag);
+    nameTag.position.y = 0.78;
+    group.add(nameTag); // children[1]
 
     return group;
   }
@@ -343,8 +358,8 @@ class PhotoMuseumApp {
 
     for (const avatar of this.remoteAvatars.values()) {
       if (!avatar.visible) continue;
-      // The name tag is the third child (index 2)
-      const nameTag = avatar.children[2] as THREE.Mesh;
+      // The name tag is the second child (index 1); index 0 is the capsule
+      const nameTag = avatar.children[1] as THREE.Mesh;
       if (!nameTag) continue;
 
       const tagWorldPos = new THREE.Vector3();

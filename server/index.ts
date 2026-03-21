@@ -303,10 +303,13 @@ interface VoiceNoteData {
   timestamp: number;
 }
 
+const AVATAR_COLOR_COUNT = 8;
+
 interface Room {
   id: string;
   ownerId: string;
   users: Map<string, UserState>;
+  usedColorIndices: Set<number>;
   photos: PhotoState[];
   annotations: Annotation[];
   drawings: StrokeData[];
@@ -316,9 +319,18 @@ interface Room {
 interface UserState {
   id: string;
   username: string;
+  colorIndex: number;
   position: { x: number; y: number; z: number };
   rotation: { x: number; y: number; z: number; w: number };
   context: string;
+}
+
+function pickColorIndex(usedColorIndices: Set<number>): number {
+  for (let i = 0; i < AVATAR_COLOR_COUNT; i++) {
+    if (!usedColorIndices.has(i)) return i;
+  }
+  // All exhausted — wrap around based on current count
+  return usedColorIndices.size % AVATAR_COLOR_COUNT;
 }
 
 interface PhotoState {
@@ -371,15 +383,19 @@ io.on('connection', (socket: Socket) => {
       id: roomId,
       ownerId: userId,
       users: new Map(),
+      usedColorIndices: new Set(),
       photos: [],
       annotations: [],
       drawings: [],
       voiceNotes: []
     };
 
+    const colorIndex = pickColorIndex(room.usedColorIndices);
+    room.usedColorIndices.add(colorIndex);
     room.users.set(userId, {
       id: userId,
       username: data.username,
+      colorIndex,
       position: { x: 0, y: 1.6, z: 0 },
       rotation: { x: 0, y: 0, z: 0, w: 1 },
       context: 'museum'
@@ -405,9 +421,12 @@ io.on('connection', (socket: Socket) => {
       return;
     }
 
+    const colorIndex = pickColorIndex(room.usedColorIndices);
+    room.usedColorIndices.add(colorIndex);
     room.users.set(userId, {
       id: userId,
       username: data.username,
+      colorIndex,
       position: { x: 0, y: 1.6, z: 0 },
       rotation: { x: 0, y: 0, z: 0, w: 1 },
       context: 'museum'
@@ -419,7 +438,8 @@ io.on('connection', (socket: Socket) => {
     // Notify others
     socket.to(data.roomId).emit('userJoined', {
       userId,
-      username: data.username
+      username: data.username,
+      colorIndex
     });
 
     callback({
@@ -541,6 +561,10 @@ io.on('connection', (socket: Socket) => {
     if (currentRoomId) {
       const room = rooms.get(currentRoomId);
       if (room) {
+        const leavingUser = room.users.get(userId);
+        if (leavingUser !== undefined) {
+          room.usedColorIndices.delete(leavingUser.colorIndex);
+        }
         room.users.delete(userId);
         io.to(currentRoomId).emit('userLeft', { userId });
 

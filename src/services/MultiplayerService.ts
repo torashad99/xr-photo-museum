@@ -5,6 +5,7 @@ import * as THREE from 'three';
 export interface RemoteUser {
   id: string;
   username: string;
+  colorIndex: number;
   position: THREE.Vector3;
   rotation: THREE.Quaternion;
   context: string;  // 'museum' | splat context string
@@ -33,6 +34,7 @@ export class MultiplayerService {
       const user: RemoteUser = {
         id: data.userId,
         username: data.username,
+        colorIndex: data.colorIndex ?? 0,
         position: new THREE.Vector3(0, 1.6, 0),
         rotation: new THREE.Quaternion(),
         context: 'museum'
@@ -95,6 +97,7 @@ export class MultiplayerService {
               this.remoteUsers.set(user.id, {
                 id: user.id,
                 username: user.username,
+                colorIndex: user.colorIndex ?? 0,
                 position: new THREE.Vector3(user.position.x, user.position.y, user.position.z),
                 rotation: new THREE.Quaternion(user.rotation.x, user.rotation.y, user.rotation.z, user.rotation.w),
                 context: user.context || 'museum'
