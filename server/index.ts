@@ -7,10 +7,40 @@ import { v4 as uuidv4 } from 'uuid';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { createHash } from 'crypto';
-import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, unlinkSync } from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+// Lock server to a single named room.
+// Usage (either form):
+//   LINK_ROOM=demo npm run server        (env var — fewest chars to type)
+//   npm run server -- -link demo         (explicit flag)
+const linkFlagIndex = process.argv.indexOf('-link');
+const LINK_ROOM: string | null =
+  process.env.LINK_ROOM ||
+  (linkFlagIndex !== -1 && process.argv[linkFlagIndex + 1]
+    ? process.argv[linkFlagIndex + 1]
+    : null);
+
+const LINK_ROOM_FILE = join(__dirname, '../.link-room');
+
+if (LINK_ROOM) {
+  writeFileSync(LINK_ROOM_FILE, LINK_ROOM, 'utf-8');
+  console.log(`[link-room] Link mode active — room: "${LINK_ROOM}"`);
+} else if (existsSync(LINK_ROOM_FILE)) {
+  // Clean up stale marker file from a previous crashed server run
+  unlinkSync(LINK_ROOM_FILE);
+}
+
+function cleanupLinkFile() {
+  try {
+    if (existsSync(LINK_ROOM_FILE)) unlinkSync(LINK_ROOM_FILE);
+  } catch {}
+}
+process.on('exit', cleanupLinkFile);
+process.on('SIGINT', () => { cleanupLinkFile(); process.exit(); });
+process.on('SIGTERM', () => { cleanupLinkFile(); process.exit(); });
 
 const IS_DEV = process.env.NODE_ENV !== 'production';
 
@@ -280,6 +310,15 @@ app.post('/api/worldlabs/cache', async (req, res) => {
   res.json({ success: true });
 });
 
+// Link-room discovery endpoint: lets the client auto-detect link mode
+app.get('/api/link-room', (req, res) => {
+  if (LINK_ROOM) {
+    res.json({ room: LINK_ROOM });
+  } else {
+    res.status(404).json({ error: 'Not in link mode' });
+  }
+});
+
 // Handle all other routes by serving index.html
 app.get(/.*/, (req, res) => {
   res.sendFile(join(__dirname, '../dist/index.html'));
@@ -362,8 +401,9 @@ const words = [
   'crystal', 'dune', 'echo', 'flame', 'gold', 'halo', 'iris', 'jade'
 ];
 
-// Generate a random 2-word passphrase
+// Generate a random 2-word passphrase (or return LINK_ROOM if in link mode)
 function generatePassphrase(): string {
+  if (LINK_ROOM) return LINK_ROOM;
   const word1 = words[Math.floor(Math.random() * words.length)];
   const word2 = words[Math.floor(Math.random() * words.length)];
   return `${word1}-${word2}`;
@@ -376,9 +416,29 @@ io.on('connection', (socket: Socket) => {
   let currentRoomId: string | null = null;
   let userId: string = socket.id;
 
-  // Create a new room
+  // Create a new room (idempotent in link mode — joins the pre-created room)
   socket.on('createRoom', (data: { username: string }, callback) => {
     const roomId = generatePassphrase();
+
+    if (LINK_ROOM && rooms.has(roomId)) {
+      // Link mode: room already exists, add this user to it
+      const room = rooms.get(roomId)!;
+      const colorIndex = pickColorIndex(room.usedColorIndices);
+      room.usedColorIndices.add(colorIndex);
+      room.users.set(userId, {
+        id: userId,
+        username: data.username,
+        colorIndex,
+        position: { x: 0, y: 1.6, z: 0 },
+        rotation: { x: 0, y: 0, z: 0, w: 1 },
+        context: 'museum'
+      });
+      socket.join(roomId);
+      currentRoomId = roomId;
+      callback({ success: true, roomId, userId });
+      return;
+    }
+
     const room: Room = {
       id: roomId,
       ownerId: userId,
@@ -568,8 +628,8 @@ io.on('connection', (socket: Socket) => {
         room.users.delete(userId);
         io.to(currentRoomId).emit('userLeft', { userId });
 
-        // Clean up empty rooms
-        if (room.users.size === 0) {
+        // Clean up empty rooms (but keep the linked room alive)
+        if (room.users.size === 0 && currentRoomId !== LINK_ROOM) {
           rooms.delete(currentRoomId);
         }
       }
@@ -581,4 +641,19 @@ const PORT = process.env.PORT || 3001;
 httpServer.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   if (IS_DEV) console.log('World Labs debug logging ENABLED');
+
+  if (LINK_ROOM) {
+    rooms.set(LINK_ROOM, {
+      id: LINK_ROOM,
+      ownerId: 'server',
+      users: new Map(),
+      usedColorIndices: new Set(),
+      photos: [],
+      annotations: [],
+      drawings: [],
+      voiceNotes: []
+    });
+    console.log(`[link-room] Room "${LINK_ROOM}" pre-created and ready`);
+    console.log(`[link-room] Invite: https://localhost:8081/?room=${LINK_ROOM}`);
+  }
 });

@@ -1,9 +1,16 @@
 import path from "path";
+import fs from "fs";
 import { optimizeGLTF } from "@iwsdk/vite-plugin-gltf-optimizer";
 import { iwsdkDev } from "@iwsdk/vite-plugin-dev";
 import { compileUIKit } from "@iwsdk/vite-plugin-uikitml";
 import { defineConfig, type Plugin } from "vite";
 import mkcert from "vite-plugin-mkcert";
+
+// Detect server link mode: server writes .link-room on startup when -link flag is used
+const linkRoomFile = path.resolve(__dirname, ".link-room");
+const LINK_ROOM: string | null = fs.existsSync(linkRoomFile)
+  ? fs.readFileSync(linkRoomFile, "utf-8").trim() || null
+  : null;
 
 const threePkg = path.resolve(__dirname, "node_modules/three");
 
@@ -44,7 +51,8 @@ export default defineConfig({
         device: "metaQuest3",
         activation: "localhost",
       },
-      ai: {}, // enables AI in agent mode with defaults
+      // In link mode, skip the headless Playwright browser (reduces overhead)
+      ...(LINK_ROOM ? {} : { ai: {} }),
       verbose: true,
     }),
 
@@ -62,7 +70,7 @@ export default defineConfig({
   server: {
     host: "0.0.0.0",
     port: 8081,
-    open: true,
+    open: LINK_ROOM ? `/?room=${LINK_ROOM}` : true,
     proxy: {
       '/socket.io': {
         target: 'http://localhost:3001',

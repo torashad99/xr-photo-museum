@@ -115,7 +115,23 @@ class PhotoMuseumApp {
 
     // Check for room invite link
     const urlParams = new URLSearchParams(window.location.search);
-    const roomId = urlParams.get('room');
+    let roomId = urlParams.get('room');
+
+    // Auto-detect server link mode when no ?room= param is present
+    if (!roomId) {
+      try {
+        const resp = await fetch('/api/link-room');
+        if (resp.ok) {
+          const data = await resp.json();
+          if (data.room) {
+            roomId = data.room;
+            window.history.replaceState({}, '', `?room=${roomId}`);
+          }
+        }
+      } catch {
+        // Server not in link mode or unreachable — proceed to createRoom normally
+      }
+    }
 
     // Create museum room
     const { roomEntity, floorEntity } = createMuseumRoom(this.world);
@@ -160,32 +176,43 @@ class PhotoMuseumApp {
     const username = urlUsername || 'User_' + Math.random().toString(36).substring(2, 7);
 
     if (roomId) {
-      const joinResponse = await this.multiplayer.joinRoom(roomId, username);
-      // Create avatars for users already in the room when we joined
-      for (const [id, user] of this.multiplayer.getRemoteUsers()) {
-        if (!this.remoteAvatars.has(id)) {
-          const avatar = this.createAvatar(user.colorIndex, user.username);
-          avatar.position.copy(user.position);
-          avatar.quaternion.copy(user.rotation);
-          this.remoteAvatars.set(id, avatar);
-          this.world.scene.add(avatar);
+      let joinedRoomId = roomId;
+      try {
+        const joinResponse = await this.multiplayer.joinRoom(roomId, username);
+        // Create avatars for users already in the room when we joined
+        for (const [id, user] of this.multiplayer.getRemoteUsers()) {
+          if (!this.remoteAvatars.has(id)) {
+            const avatar = this.createAvatar(user.colorIndex, user.username);
+            avatar.position.copy(user.position);
+            avatar.quaternion.copy(user.rotation);
+            this.remoteAvatars.set(id, avatar);
+            this.world.scene.add(avatar);
+          }
         }
-      }
-      // Replay drawings and voice notes that existed before we joined
-      if (joinResponse.drawings) {
-        for (const stroke of joinResponse.drawings) {
-          this.replayStroke(stroke);
+        // Replay drawings and voice notes that existed before we joined
+        if (joinResponse.drawings) {
+          for (const stroke of joinResponse.drawings) {
+            this.replayStroke(stroke);
+          }
         }
-      }
-      if (joinResponse.voiceNotes) {
-        for (const vn of joinResponse.voiceNotes) {
-          const audioBlob = new Blob([vn.audioData], { type: 'audio/webm' });
-          const audioUrl = URL.createObjectURL(audioBlob);
-          createVoiceNote(this.world, new THREE.Vector3(vn.position.x, vn.position.y, vn.position.z), audioUrl, vn.context || 'museum');
+        if (joinResponse.voiceNotes) {
+          for (const vn of joinResponse.voiceNotes) {
+            const audioBlob = new Blob([vn.audioData], { type: 'audio/webm' });
+            const audioUrl = URL.createObjectURL(audioBlob);
+            createVoiceNote(this.world, new THREE.Vector3(vn.position.x, vn.position.y, vn.position.z), audioUrl, vn.context || 'museum');
+          }
         }
+      } catch (err) {
+        // Room not found (server restarted, stale link, etc.) — create a fresh one
+        console.warn('[Init] Could not join room, creating new one:', err);
+        const { roomId: newRoomId } = await this.multiplayer.createRoom(username);
+        joinedRoomId = newRoomId;
+        window.history.replaceState({}, '', `?room=${joinedRoomId}`);
       }
-      // Show invite link on green wall so the joining user can share further
-      this.createInviteLinkDisplay(roomId);
+      // Always show the invite banner regardless of join/fallback path
+      const inviteLink = `${window.location.origin}?room=${joinedRoomId}`;
+      console.log('Share this invite link:', inviteLink);
+      this.createInviteLinkDisplay(joinedRoomId);
     } else {
       const { roomId: newRoomId } = await this.multiplayer.createRoom(username);
       const inviteLink = `${window.location.origin}?room=${newRoomId}`;

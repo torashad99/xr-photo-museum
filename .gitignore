@@ -41,6 +41,7 @@ coverage/
 # Temporary files
 .tmp/
 .temp/
+.link-room
 
 # Editor directories and files
 .vscode/*
