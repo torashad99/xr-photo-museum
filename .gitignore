@@ -43,6 +43,9 @@ coverage/
 .temp/
 .link-room
 
+# Git worktrees
+.worktrees/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
