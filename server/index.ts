@@ -193,7 +193,7 @@ app.post('/api/worldlabs/generate', async (req, res) => {
         image_prompt: imagePrompt,
       },
       display_name: name || 'Untitled',
-      model: 'Marble 0.1-mini',
+      model: 'marble-1.0-draft',
     };
 
     debugLog('Generate → POST /worlds:generate', JSON.stringify({
@@ -233,7 +233,7 @@ app.post('/api/worldlabs/generate', async (req, res) => {
       operationId,
       status: 'generating',
       startedAt,
-      estimatedDurationMs: 60_000, // ~1 minute for Marble 0.1-mini
+      estimatedDurationMs: 60_000, // ~1 minute for Marble 0.1-mini / marble-1.0-draft
     });
   } catch (err: any) {
     debugLog('Generate → ERROR:', err.message);
