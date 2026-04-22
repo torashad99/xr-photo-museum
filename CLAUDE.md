@@ -50,3 +50,5 @@ Vite dev server proxies `/socket.io` to `localhost:3001`. The Socket.IO client c
 
 ### Compact Instructions
 Before any /compact or when context exceeds 80%, summarize the current task status, key decisions, and any 'gotchas' into a progress.md file or project memory.
+
+### Do not use Git Worktrees. Keep in one branch.
