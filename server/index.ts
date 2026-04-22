@@ -7,7 +7,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { createHash } from 'crypto';
-import { readFileSync, writeFileSync, existsSync, unlinkSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, unlinkSync, mkdirSync } from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -58,10 +58,35 @@ const io = new Server(httpServer, {
   maxHttpBufferSize: 5e6  // 5MB for voice note binary payloads
 });
 
-app.use(express.json());
+app.use(express.json({ limit: '25mb' }));
 
 // Serve static files from dist
 app.use(express.static(join(__dirname, '../dist')));
+// Serve user-uploaded photos (created at runtime, not part of the build)
+app.use('/uploads', express.static(join(__dirname, '../public/uploads')));
+
+// ── Local photo upload ───────────────────────────────────────────────
+
+const UPLOADS_DIR = join(__dirname, '../public/uploads');
+
+app.post('/api/upload', (req, res) => {
+  const { base64, ext } = req.body;
+  if (!base64) {
+    res.status(400).json({ error: 'base64 required' });
+    return;
+  }
+
+  const safeExt = (ext || 'jpg').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+  const filename = `${uuidv4()}.${safeExt}`;
+
+  try {
+    if (!existsSync(UPLOADS_DIR)) mkdirSync(UPLOADS_DIR, { recursive: true });
+    writeFileSync(join(UPLOADS_DIR, filename), Buffer.from(base64, 'base64'));
+    res.json({ url: `/uploads/${filename}` });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // ── World Labs API Proxy + Cache ────────────────────────────────────
 
@@ -310,6 +335,30 @@ app.post('/api/worldlabs/cache', async (req, res) => {
   res.json({ success: true });
 });
 
+// Delete a cache entry by imageUrl (called on portal world deletion)
+app.post('/api/worldlabs/cache/delete', (req, res) => {
+  const { imageUrl } = req.body;
+  if (!imageUrl) {
+    res.status(400).json({ error: 'imageUrl required' });
+    return;
+  }
+  const cache = readCache();
+  const key = hashKey(imageUrl);
+  let removed = false;
+  if (cache[key]) {
+    const entry = cache[key];
+    delete cache[key];
+    for (const k of Object.keys(cache)) {
+      if (k.startsWith('op:') && cache[k].worldId === entry.worldId) {
+        delete cache[k];
+      }
+    }
+    writeCache(cache);
+    removed = true;
+  }
+  res.json({ removed });
+});
+
 // Link-room discovery endpoint: lets the client auto-detect link mode
 app.get('/api/link-room', (req, res) => {
   if (LINK_ROOM) {
@@ -353,6 +402,7 @@ interface Room {
   annotations: Annotation[];
   drawings: StrokeData[];
   voiceNotes: VoiceNoteData[];
+  portalWorlds: PortalWorldRecord[];
 }
 
 interface UserState {
@@ -376,6 +426,21 @@ interface PhotoState {
   frameIndex: number;
   photoUrl: string;
   photoId: string;
+}
+
+interface PortalWorldRecord {
+  frameIndex: number;
+  imageUrl: string;
+  imageName: string;
+  photoId: string;
+  state: 'waiting' | 'ready';
+  operationId?: string;
+  startedAt?: number;
+  estimatedDurationMs?: number;
+  spzUrl?: string;
+  colliderMeshUrl?: string;
+  rotationPreset: number;
+  scale: number;
 }
 
 interface Annotation {
@@ -447,7 +512,8 @@ io.on('connection', (socket: Socket) => {
       photos: [],
       annotations: [],
       drawings: [],
-      voiceNotes: []
+      voiceNotes: [],
+      portalWorlds: [],
     };
 
     const colorIndex = pickColorIndex(room.usedColorIndices);
@@ -513,7 +579,8 @@ io.on('connection', (socket: Socket) => {
       voiceNotes: room.voiceNotes.map(vn => ({
         ...vn,
         audioData: vn.audioData  // Buffer is binary-compatible with Socket.IO
-      }))
+      })),
+      portalWorlds: room.portalWorlds,
     });
   });
 
@@ -616,6 +683,34 @@ io.on('connection', (socket: Socket) => {
     }
   });
 
+  // Portal world lifecycle
+  socket.on('addPortalWorld', (record: PortalWorldRecord) => {
+    if (!currentRoomId) return;
+    const room = rooms.get(currentRoomId);
+    if (!room) return;
+    room.portalWorlds = room.portalWorlds.filter(r => r.frameIndex !== record.frameIndex);
+    room.portalWorlds.push(record);
+    io.to(currentRoomId).emit('portalWorldAdded', record);
+  });
+
+  socket.on('updatePortalWorld', (record: PortalWorldRecord) => {
+    if (!currentRoomId) return;
+    const room = rooms.get(currentRoomId);
+    if (!room) return;
+    const idx = room.portalWorlds.findIndex(r => r.frameIndex === record.frameIndex);
+    if (idx >= 0) room.portalWorlds[idx] = record;
+    else room.portalWorlds.push(record);
+    io.to(currentRoomId).emit('portalWorldUpdated', record);
+  });
+
+  socket.on('removePortalWorld', (data: { frameIndex: number }) => {
+    if (!currentRoomId) return;
+    const room = rooms.get(currentRoomId);
+    if (!room) return;
+    room.portalWorlds = room.portalWorlds.filter(r => r.frameIndex !== data.frameIndex);
+    socket.to(currentRoomId).emit('portalWorldRemoved', { frameIndex: data.frameIndex });
+  });
+
   // Handle disconnect
   socket.on('disconnect', () => {
     if (currentRoomId) {
@@ -651,7 +746,8 @@ httpServer.listen(PORT, () => {
       photos: [],
       annotations: [],
       drawings: [],
-      voiceNotes: []
+      voiceNotes: [],
+      portalWorlds: [],
     });
     console.log(`[link-room] Room "${LINK_ROOM}" pre-created and ready`);
     console.log(`[link-room] Invite: https://localhost:8081/?room=${LINK_ROOM}`);

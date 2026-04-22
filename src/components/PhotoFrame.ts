@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { World, Entity } from '@iwsdk/core';
 import { PhotoFrame } from './MuseumRoom';
+import { createSlotPlusMarker } from './SlotPlusMarker';
 
 export interface FramePosition {
   position: THREE.Vector3;
@@ -40,6 +41,11 @@ export function createPhotoFrame(
   canvas.name = 'photoCanvas';
   frameGroup.add(canvas);
 
+  // "+" overlay visible on empty slots (slots 1-17 only; slot 0 never calls createPhotoFrame)
+  const plusMarker = createSlotPlusMarker(frameGroup);
+  frameGroup.userData.plusMarker = plusMarker;
+  frameGroup.userData.frameIndex = frameIndex;
+
   // Bind visuals to entity AFTER setting transform
   const frameEntity = world.createTransformEntity(frameGroup);
 
@@ -74,11 +80,15 @@ export async function setFramePhoto(
 
           if (canvas) {
             (canvas.material as THREE.MeshBasicMaterial).map = texture;
+            (canvas.material as THREE.MeshBasicMaterial).color.set(0xffffff);
             (canvas.material as THREE.MeshBasicMaterial).needsUpdate = true;
 
             frameEntity.setValue(PhotoFrame, 'photoUrl', photoUrl);
             frameEntity.setValue(PhotoFrame, 'photoId', photoId);
           }
+
+          // Hide the "+" once a photo is loaded
+          frameGroup.userData.plusMarker?.setVisible(false);
         }
         resolve();
       },
@@ -86,6 +96,29 @@ export async function setFramePhoto(
       reject
     );
   });
+}
+
+/** Revert a slot back to the empty "+" state (used after world deletion). */
+export function setFrameEmpty(frameEntity: Entity): void {
+  const frameGroup = frameEntity.object3D as THREE.Group;
+  if (!frameGroup) return;
+
+  const canvas = frameGroup.getObjectByName('photoCanvas') as THREE.Mesh;
+  if (canvas) {
+    const mat = canvas.material as THREE.MeshBasicMaterial;
+    if (mat.map) {
+      mat.map.dispose();
+      mat.map = null;
+    }
+    mat.color.set(0xffffff);
+    mat.needsUpdate = true;
+  }
+
+  frameEntity.setValue(PhotoFrame, 'photoUrl', '');
+  frameEntity.setValue(PhotoFrame, 'photoId', '');
+
+  // Re-show the "+" overlay
+  frameGroup.userData.plusMarker?.setVisible(true);
 }
 
 // Generate frame positions around the room

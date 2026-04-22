@@ -2,6 +2,21 @@
 import { io, Socket } from 'socket.io-client';
 import * as THREE from 'three';
 
+export interface PortalWorldRecord {
+  frameIndex: number;
+  imageUrl: string;
+  imageName: string;
+  photoId: string;
+  state: 'waiting' | 'ready';
+  operationId?: string;
+  startedAt?: number;
+  estimatedDurationMs?: number;
+  spzUrl?: string;
+  colliderMeshUrl?: string;
+  rotationPreset: number;
+  scale: number;
+}
+
 export interface RemoteUser {
   id: string;
   username: string;
@@ -21,6 +36,9 @@ export class MultiplayerService {
   private onPhotosUpdated: ((photos: any[]) => void) | null = null;
   private onAnnotationAdded: ((annotation: any) => void) | null = null;
   private onVoiceNoteAdded: ((data: { position: { x: number, y: number, z: number }, audioData: ArrayBuffer, context?: string }) => void) | null = null;
+  private onPortalWorldAdded: ((record: PortalWorldRecord) => void) | null = null;
+  private onPortalWorldUpdated: ((record: PortalWorldRecord) => void) | null = null;
+  private onPortalWorldRemoved: ((frameIndex: number) => void) | null = null;
   private lastPositionUpdate: number = 0;
   private readonly POSITION_THROTTLE_MS = 50; // 20 updates/sec
 
@@ -72,6 +90,18 @@ export class MultiplayerService {
 
     this.socket.on('voiceNoteAdded', (data) => {
       this.onVoiceNoteAdded?.(data);
+    });
+
+    this.socket.on('portalWorldAdded', (record: PortalWorldRecord) => {
+      this.onPortalWorldAdded?.(record);
+    });
+
+    this.socket.on('portalWorldUpdated', (record: PortalWorldRecord) => {
+      this.onPortalWorldUpdated?.(record);
+    });
+
+    this.socket.on('portalWorldRemoved', (data: { frameIndex: number }) => {
+      this.onPortalWorldRemoved?.(data.frameIndex);
     });
   }
 
@@ -176,6 +206,30 @@ export class MultiplayerService {
 
   setOnVoiceNoteAdded(callback: (data: { position: { x: number, y: number, z: number }, audioData: ArrayBuffer, context?: string }) => void): void {
     this.onVoiceNoteAdded = callback;
+  }
+
+  addPortalWorld(record: PortalWorldRecord): void {
+    this.socket.emit('addPortalWorld', record);
+  }
+
+  updatePortalWorld(record: PortalWorldRecord): void {
+    this.socket.emit('updatePortalWorld', record);
+  }
+
+  removePortalWorld(frameIndex: number): void {
+    this.socket.emit('removePortalWorld', { frameIndex });
+  }
+
+  setOnPortalWorldAdded(callback: (record: PortalWorldRecord) => void): void {
+    this.onPortalWorldAdded = callback;
+  }
+
+  setOnPortalWorldUpdated(callback: (record: PortalWorldRecord) => void): void {
+    this.onPortalWorldUpdated = callback;
+  }
+
+  setOnPortalWorldRemoved(callback: (frameIndex: number) => void): void {
+    this.onPortalWorldRemoved = callback;
   }
 
   getRemoteUsers(): Map<string, RemoteUser> {

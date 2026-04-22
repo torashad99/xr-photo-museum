@@ -24,6 +24,9 @@ export class GaussianSplatWorld {
   private _up = new THREE.Vector3(0, 1, 0);
   private _thumbstick = new THREE.Vector2();
 
+  // Saved orientation/scale per world
+  private currentPreset = 1;
+
   // Dual-grip zoom state (Open Brush style)
   private currentScale = 1.5;
   private isGrabbing = false;
@@ -45,7 +48,35 @@ export class GaussianSplatWorld {
     this.world = world;
   }
 
-  async loadSplat(spzUrl: string): Promise<void> {
+  private applyPresetInternal(preset: number, scale: number): void {
+    if (!this.splatMesh) return;
+    // 6 orientation presets for fixing World Labs splat orientation
+    const presets: [number, number, number][] = [
+      [0, 0, 0],           // 0: identity
+      [Math.PI, 0, 0],     // 1: flip-X π (current default — World Labs splats arrive upside-down)
+      [0, 0, Math.PI],     // 2: flip-Z π
+      [0, Math.PI / 2, 0], // 3: +90° yaw
+      [0, -Math.PI / 2, 0],// 4: −90° yaw
+      [0, Math.PI, 0],     // 5: π yaw
+    ];
+    const [rx, ry, rz] = presets[Math.min(Math.max(preset, 0), 5)];
+    this.splatMesh.rotation.set(rx, ry, rz);
+    this.splatMesh.scale.setScalar(scale);
+    this.currentPreset = preset;
+    this.currentScale = scale;
+  }
+
+  /** Live-preview a different orientation preset + scale from the adjust panel. */
+  applyPreset(preset: number, scale: number): void {
+    this.applyPresetInternal(preset, scale);
+  }
+
+  /** Returns the current orientation preset index and scale for Save fix. */
+  getCurrentTransform(): { preset: number; scale: number } {
+    return { preset: this.currentPreset, scale: this.currentScale };
+  }
+
+  async loadSplat(spzUrl: string, opts?: { rotationPreset?: number; scale?: number }): Promise<void> {
     console.log('[SparkJS] Initializing SparkRenderer...');
 
     // Save and set scene background to black (splats are self-illuminated)
@@ -106,9 +137,8 @@ export class GaussianSplatWorld {
 
     console.log('[SparkJS] SplatMesh initialized, splatCount:', (this.splatMesh as any).splatCount ?? 'unknown');
 
-    // Fix orientation (World Labs splats come upside down) and scale up
-    this.splatMesh.rotation.x = Math.PI;
-    this.splatMesh.scale.setScalar(1.5);
+    // Apply orientation preset and scale (defaults reproduce old behavior: flip-X π, scale 1.5)
+    this.applyPresetInternal(opts?.rotationPreset ?? 1, opts?.scale ?? 1.5);
 
     this.splatMesh.renderOrder = -10;
     this.world.scene.add(this.splatMesh);
@@ -132,7 +162,7 @@ export class GaussianSplatWorld {
       console.log(`[SparkJS] Splat bounds center: (${center.x.toFixed(2)}, ${center.y.toFixed(2)}, ${center.z.toFixed(2)}), radius: ${radius.toFixed(2)}, pullback: ${pullback.toFixed(2)}`);
     }
 
-    console.log('[SparkJS] SplatMesh added to scene, rotated 180° on X, scaled 1.5x');
+    console.log(`[SparkJS] SplatMesh added to scene, preset ${opts?.rotationPreset ?? 1}, scale ${opts?.scale ?? 1.5}`);
   }
 
   update(delta: number): void {

@@ -111,4 +111,44 @@ export class WorldLabsService {
       }
     }
   }
+
+  async deleteCache(imageUrl: string): Promise<void> {
+    await fetch('/api/worldlabs/cache/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ imageUrl }),
+    });
+  }
+
+  /**
+   * Upload a blob: URL to the server and return the server-hosted path.
+   * Required before calling startGeneration — World Labs can't fetch blob: URLs.
+   */
+  async uploadBlobPhoto(blobUrl: string, filename: string): Promise<string> {
+    const resp = await fetch(blobUrl);
+    const arrayBuffer = await resp.arrayBuffer();
+    const bytes = new Uint8Array(arrayBuffer);
+
+    // Build base64 without spread (avoids stack overflow on large files)
+    let binary = '';
+    for (let i = 0; i < bytes.length; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    const base64 = btoa(binary);
+
+    const ext = filename.split('.').pop() || 'jpg';
+    const uploadResp = await fetch('/api/upload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ base64, ext }),
+    });
+
+    if (!uploadResp.ok) {
+      const err = await uploadResp.json();
+      throw new Error(err.error || 'Upload failed');
+    }
+
+    const data = await uploadResp.json();
+    return data.url as string;
+  }
 }

@@ -1,18 +1,27 @@
 // src/components/PortalUI.ts
 import * as THREE from 'three';
 import { World } from '@iwsdk/core';
+import { getControllerTips } from './InputHelpers';
 
 export type PortalButtonState = 'generate' | 'waiting' | 'enter';
 
 export interface PortalUIHandle {
   checkPress(world: World): PortalButtonState | null;
   checkRaycastPress(raycaster: THREE.Raycaster, interactDown: boolean): PortalButtonState | null;
+  checkTrashPress(world: World): boolean;
+  checkTrashRaycastPress(raycaster: THREE.Raycaster, interactDown: boolean): boolean;
   getButtonMesh(): THREE.Mesh;
   setState(state: PortalButtonState): void;
   startCountdown(durationMs: number): void;
   updateCountdown(): void;
   getState(): PortalButtonState;
+  setVisible(visible: boolean): void;
+  setTrashEnabled(enabled: boolean): void;
   dispose(): void;
+}
+
+export interface PortalUIOptions {
+  withTrash?: boolean;
 }
 
 export function createPortalUI(
@@ -21,7 +30,10 @@ export function createPortalUI(
   frameRotation: THREE.Euler,
   imageName: string,
   initialState: PortalButtonState = 'generate',
+  options: PortalUIOptions = {},
 ): PortalUIHandle {
+  const withTrash = options.withTrash !== false;
+
   const uiGroup = new THREE.Group();
 
   // Position below the frame
@@ -50,7 +62,7 @@ export function createPortalUI(
   nameMesh.position.z = 0.06;
   uiGroup.add(nameMesh);
 
-  // Button
+  // Main button
   const buttonGeometry = new THREE.BoxGeometry(1.0, 0.3, 0.05);
   const buttonCanvas = document.createElement('canvas');
   const buttonCtx = buttonCanvas.getContext('2d')!;
@@ -78,11 +90,42 @@ export function createPortalUI(
   buttonMesh.position.z = 0.06;
   uiGroup.add(buttonMesh);
 
+  // Trash button (positioned to the right of the main button)
+  const trashCanvas = document.createElement('canvas');
+  const trashCtx = trashCanvas.getContext('2d')!;
+  trashCanvas.width = 128;
+  trashCanvas.height = 128;
+
+  const trashTexture = new THREE.CanvasTexture(trashCanvas);
+
+  function drawTrash(bgColor: string) {
+    trashCtx.clearRect(0, 0, 128, 128);
+    trashCtx.fillStyle = bgColor;
+    trashCtx.fillRect(0, 0, 128, 128);
+    trashCtx.strokeStyle = '#ffffff';
+    trashCtx.lineWidth = 3;
+    trashCtx.strokeRect(3, 3, 122, 122);
+    trashCtx.fillStyle = '#ffffff';
+    trashCtx.font = '72px Arial';
+    trashCtx.textAlign = 'center';
+    trashCtx.textBaseline = 'middle';
+    trashCtx.fillText('🗑', 64, 68);
+    trashTexture.needsUpdate = true;
+  }
+
+  const trashGeometry = new THREE.BoxGeometry(0.25, 0.3, 0.05);
+  const trashMaterial = new THREE.MeshBasicMaterial({ map: trashTexture, side: THREE.DoubleSide });
+  const trashMesh = new THREE.Mesh(trashGeometry, trashMaterial);
+  trashMesh.position.set(0.7, 0, 0.06);
+  uiGroup.add(trashMesh);
+
   world.scene.add(uiGroup);
 
   let state: PortalButtonState = initialState;
   let isHovered = false;
   let pressedLastFrame = false;
+  let trashHovered = false;
+  let trashPressedLastFrame = false;
 
   // Countdown state
   let countdownEndTime = 0;
@@ -100,40 +143,20 @@ export function createPortalUI(
     enter: 'Enter World',
   };
 
+  function updateTrashVisibility() {
+    trashMesh.visible = withTrash && (state === 'waiting' || state === 'enter');
+  }
+
   function renderState() {
     drawButton(STATE_LABELS[state], STATE_COLORS[state].normal);
+    drawTrash('#8a1a1a');
+    updateTrashVisibility();
   }
 
   renderState();
 
-  // Helper: get controller/hand tip positions
-  function getControllerTips(world: World): THREE.Vector3[] {
-    const tips: THREE.Vector3[] = [];
-
-    const raySpaces = world.input.xrOrigin?.raySpaces;
-    if (raySpaces) {
-      if (raySpaces.left) {
-        tips.push(new THREE.Vector3().setFromMatrixPosition(raySpaces.left.matrixWorld));
-      }
-      if (raySpaces.right) {
-        tips.push(new THREE.Vector3().setFromMatrixPosition(raySpaces.right.matrixWorld));
-      }
-    }
-
-    const hands = world.input.visualAdapters?.hand;
-    if (hands) {
-      if (hands.left?.connected && hands.left.gripSpace) {
-        tips.push(new THREE.Vector3().setFromMatrixPosition(hands.left.gripSpace.matrixWorld));
-      }
-      if (hands.right?.connected && hands.right.gripSpace) {
-        tips.push(new THREE.Vector3().setFromMatrixPosition(hands.right.gripSpace.matrixWorld));
-      }
-    }
-
-    return tips;
-  }
-
   const _buttonBox = new THREE.Box3();
+  const _trashBox = new THREE.Box3();
 
   /** Returns the state that was pressed, or null if nothing was pressed. */
   function checkPress(world: World): PortalButtonState | null {
@@ -177,10 +200,65 @@ export function createPortalUI(
     return null;
   }
 
+  function checkTrashPress(world: World): boolean {
+    if (!trashMesh.visible || !trashEnabled) return false;
+
+    trashMesh.updateWorldMatrix(true, false);
+    _trashBox.setFromObject(trashMesh);
+    _trashBox.expandByScalar(0.05);
+
+    const tips = getControllerTips(world);
+    let anyInside = false;
+    for (const tip of tips) {
+      if (_trashBox.containsPoint(tip)) { anyInside = true; break; }
+    }
+
+    if (anyInside && !trashHovered) {
+      trashHovered = true;
+      drawTrash('#cc3333');
+    } else if (!anyInside && trashHovered) {
+      trashHovered = false;
+      drawTrash('#8a1a1a');
+    }
+
+    if (anyInside && !trashPressedLastFrame) {
+      trashPressedLastFrame = true;
+      drawTrash('#ff5555');
+      return true;
+    }
+    if (!anyInside) trashPressedLastFrame = false;
+    return false;
+  }
+
+  function checkTrashRaycastPress(raycaster: THREE.Raycaster, interactDown: boolean): boolean {
+    if (!trashMesh.visible || !trashEnabled) return false;
+
+    const intersects = raycaster.intersectObject(trashMesh);
+    const isHit = intersects.length > 0;
+
+    if (isHit && !trashHovered) {
+      trashHovered = true;
+      drawTrash('#cc3333');
+    } else if (!isHit && trashHovered) {
+      trashHovered = false;
+      drawTrash('#8a1a1a');
+    }
+
+    if (isHit && interactDown && !trashPressedLastFrame) {
+      trashPressedLastFrame = true;
+      drawTrash('#ff5555');
+      return true;
+    }
+    if (!isHit || !interactDown) trashPressedLastFrame = false;
+    return false;
+  }
+
   function setState(newState: PortalButtonState) {
     state = newState;
     isHovered = false;
     pressedLastFrame = false;
+    trashHovered = false;
+    trashPressedLastFrame = false;
     renderState();
   }
 
@@ -190,6 +268,7 @@ export function createPortalUI(
     pressedLastFrame = false;
     countdownEndTime = Date.now() + durationMs;
     updateCountdown();
+    updateTrashVisibility();
   }
 
   function updateCountdown() {
@@ -240,6 +319,22 @@ export function createPortalUI(
     return buttonMesh;
   }
 
+  function setVisible(visible: boolean) {
+    uiGroup.visible = visible;
+  }
+
+  let trashEnabled = true;
+  function setTrashEnabled(enabled: boolean) {
+    if (trashEnabled === enabled) return;
+    trashEnabled = enabled;
+    // Gray out / restore trash button tint
+    if (!enabled) {
+      trashMesh.visible = false; // hide completely when occupied
+    } else {
+      updateTrashVisibility(); // restore normal visibility rules
+    }
+  }
+
   function dispose() {
     world.scene.remove(uiGroup);
     buttonGeometry.dispose();
@@ -248,7 +343,14 @@ export function createPortalUI(
     nameTexture.dispose();
     nameMesh.geometry.dispose();
     (nameMesh.material as THREE.Material).dispose();
+    trashGeometry.dispose();
+    trashMaterial.dispose();
+    trashTexture.dispose();
   }
 
-  return { checkPress, checkRaycastPress, getButtonMesh, setState, startCountdown, updateCountdown, getState, dispose };
+  return {
+    checkPress, checkRaycastPress, checkTrashPress, checkTrashRaycastPress,
+    getButtonMesh, setState, startCountdown, updateCountdown, getState,
+    setVisible, setTrashEnabled, dispose,
+  };
 }

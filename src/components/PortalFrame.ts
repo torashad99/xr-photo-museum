@@ -1,6 +1,6 @@
 // src/components/PortalFrame.ts
 import * as THREE from 'three';
-import { World, Entity } from '@iwsdk/core';
+import { World } from '@iwsdk/core';
 import { FramePosition } from './PhotoFrame';
 
 const parallaxVertexShader = `
@@ -25,7 +25,6 @@ const parallaxFragmentShader = `
 `;
 
 export interface PortalFrameHandle {
-  entity: Entity;
   group: THREE.Group;
   updateParallax(camera: THREE.Camera): void;
   dispose(): void;
@@ -82,7 +81,7 @@ export function createPortalFrame(
   glow.position.z = -0.01;
   frameGroup.add(glow);
 
-  const entity = world.createTransformEntity(frameGroup);
+  world.scene.add(frameGroup);
 
   // Reusable vectors for parallax calculation
   const _frameWorldPos = new THREE.Vector3();
@@ -120,5 +119,5 @@ export function createPortalFrame(
     world.scene.remove(frameGroup);
   }
 
-  return { entity, group: frameGroup, updateParallax, dispose };
+  return { group: frameGroup, updateParallax, dispose };
 }

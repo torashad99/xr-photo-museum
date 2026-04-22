@@ -2,17 +2,21 @@
 import { World, Entity } from '@iwsdk/core';
 import { XRInputVisualAdapter, AnimatedController, InputComponent } from '@iwsdk/xr-input';
 import * as THREE from 'three';
-import { createMuseumRoom } from './components/MuseumRoom';
-import { createPhotoFrame, generateFramePositions, setFramePhoto } from './components/PhotoFrame';
+import { createMuseumRoom, PhotoFrame } from './components/MuseumRoom';
+import { createPhotoFrame, generateFramePositions, setFramePhoto, setFrameEmpty } from './components/PhotoFrame';
+import { SlotPlusMarkerHandle } from './components/SlotPlusMarker';
 import { createAnnotation, updateAnnotationFacing, hideAllAnnotations, showAllAnnotations } from './components/Annotation';
 import { createVoiceNote, updateVoiceNoteFacing, hideAllVoiceNotes, showAllVoiceNotes, showVoiceNotesInContext, getVoiceNoteSpheres } from './components/VoiceNote';
 import { GoogleAuthService } from './services/googleAuth';
 import { GooglePhotosService, MediaItem } from './services/photosService'
-import { MultiplayerService, RemoteUser } from './services/MultiplayerService';
+import { MultiplayerService, RemoteUser, PortalWorldRecord } from './services/MultiplayerService';
 import { CreativeInputSystem } from './components/CreativeInputSystem';
 import { startStroke, addPointToStroke, hideAllDrawings, showAllDrawings, showDrawingsInContext } from './components/Drawing';
 import { createPortalFrame, PortalFrameHandle } from './components/PortalFrame';
-import { createPortalUI, PortalUIHandle, PortalButtonState } from './components/PortalUI';
+import { createPortalUI, PortalUIHandle, PortalButtonState, PortalUIOptions } from './components/PortalUI';
+import { createPhotoPicker, PhotoPickerHandle } from './components/PhotoPicker';
+import { createSplatAdjustPanel, SplatAdjustPanelHandle } from './components/SplatAdjustPanel';
+import { createTrashConfirmDialog, TrashConfirmHandle } from './components/TrashConfirmDialog';
 import { GaussianSplatWorld } from './components/GaussianSplatWorld';
 import { WorldLabsService, SplatResult } from './services/WorldLabsService';
 import { FlatModeOverlay, FlatModeInput } from './components/FlatModeOverlay';
@@ -36,13 +40,24 @@ class PhotoMuseumApp {
   private creativeInput: CreativeInputSystem | null = null;
   private inSplatWorld: boolean = false;
   private currentSplatContext: string | null = null;
+  private currentSplatFrameIndex: number | null = null;
 
-  // Portal / Splat world
+  // Portal / Splat world (slot 0 — legacy hardcoded path)
   private portalFrame: PortalFrameHandle | null = null;
   private portalUI: PortalUIHandle | null = null;
   private gaussianSplatWorld: GaussianSplatWorld | null = null;
   private worldLabsService: WorldLabsService = new WorldLabsService();
   private cachedSplatResult: SplatResult | null = null;
+
+  // Generalized asset pipeline — slots 1-17
+  private adjustPanel: SplatAdjustPanelHandle | null = null;
+  private photoPicker: PhotoPickerHandle | null = null;
+  private targetedFrameIndex: number | null = null;
+  private portalUIHandlesByFrame = new Map<number, PortalUIHandle>();
+  private portalFrameHandlesByFrame = new Map<number, PortalFrameHandle>();
+  private portalWorldsByFrame = new Map<number, PortalWorldRecord>();
+  private generatingFrameIndices = new Set<number>();
+  private trashDialogsByFrame = new Map<number, TrashConfirmHandle>();
 
   // Invite link display mesh on the green wall
   private inviteLinkMesh: THREE.Mesh | null = null;
@@ -164,6 +179,7 @@ class PhotoMuseumApp {
       portalPos.rotation,
       this.PORTAL_IMAGE_NAME,
       initialPortalState,
+      { withTrash: false },
     );
 
     // Setup multiplayer callbacks
@@ -200,6 +216,11 @@ class PhotoMuseumApp {
             const audioBlob = new Blob([vn.audioData], { type: 'audio/webm' });
             const audioUrl = URL.createObjectURL(audioBlob);
             createVoiceNote(this.world, new THREE.Vector3(vn.position.x, vn.position.y, vn.position.z), audioUrl, vn.context || 'museum');
+          }
+        }
+        if (joinResponse.portalWorlds) {
+          for (const record of joinResponse.portalWorlds) {
+            await this.applyRemotePortalWorld(record);
           }
         }
       } catch (err) {
@@ -326,6 +347,18 @@ class PhotoMuseumApp {
     this.multiplayer.setOnStrokeAdded((stroke) => {
       this.replayStroke(stroke);
       showDrawingsInContext(this.currentSplatContext || 'museum');
+    });
+
+    this.multiplayer.setOnPortalWorldAdded((record) => {
+      this.applyRemotePortalWorld(record);
+    });
+
+    this.multiplayer.setOnPortalWorldUpdated((record) => {
+      this.applyRemotePortalWorld(record);
+    });
+
+    this.multiplayer.setOnPortalWorldRemoved((frameIndex) => {
+      this.applyRemotePortalWorldRemoved(frameIndex);
     });
   }
 
@@ -521,24 +554,62 @@ class PhotoMuseumApp {
     }
   }
 
-  /** Phase 2: Load the cached splat and enter the world. */
-  private async enterSplatWorld(splatContext?: string): Promise<void> {
-    if (!this.portalUI || !this.cachedSplatResult) return;
-    const ctx = splatContext ?? `splat:${this.PORTAL_IMAGE_URL}`;
+  /** Slot 0 enter — shim that builds a synthetic record and delegates to the unified path. */
+  private async enterSplatWorld(): Promise<void> {
+    if (!this.cachedSplatResult) return;
+    await this.enterSplatForRecord({
+      frameIndex: 0,
+      imageUrl: this.PORTAL_IMAGE_URL,
+      imageName: this.PORTAL_IMAGE_NAME,
+      photoId: '',
+      state: 'ready',
+      spzUrl: this.cachedSplatResult.spzUrl,
+      colliderMeshUrl: this.cachedSplatResult.colliderMeshUrl,
+      rotationPreset: 1,
+      scale: 1.5,
+    });
+  }
 
-    const result = this.cachedSplatResult;
+  /** Unified enter path for both slot 0 and slots 1-17. */
+  private async enterSplatForRecord(record: PortalWorldRecord): Promise<void> {
+    if (!record.spzUrl) return;
+    const ctx = `splat:${record.imageUrl}`;
+    this.currentSplatFrameIndex = record.frameIndex;
 
     try {
-      console.log('[SplatWorld] Entering with spzUrl:', result.spzUrl);
+      console.log('[SplatWorld] Entering slot', record.frameIndex, 'spzUrl:', record.spzUrl);
 
       // Hide museum entities
       if (this.roomEntity?.object3D) this.roomEntity.object3D.visible = false;
       for (const entity of this.frameEntities) {
         if (entity.object3D) entity.object3D.visible = false;
       }
+
+      // Always hide slot-0 portal frame (part of museum visuals)
       if (this.portalFrame) this.portalFrame.group.visible = false;
-      this.portalUI.dispose();
-      this.portalUI = null;
+
+      // Hide all slot 1-17 portal frames
+      for (const [, pfh] of this.portalFrameHandlesByFrame) {
+        pfh.group.visible = false;
+      }
+
+      // Hide ALL PortalUI handles — they live independently in world.scene
+      this.portalUI?.setVisible(false);
+      for (const [fi, slotUI] of this.portalUIHandlesByFrame) {
+        if (fi === record.frameIndex) {
+          // Dispose active slot's UI so it's re-created in 'enter' state on exit
+          slotUI.dispose();
+          this.portalUIHandlesByFrame.delete(fi);
+        } else {
+          slotUI.setVisible(false);
+        }
+      }
+
+      // For slot 0, dispose the scalar portalUI when entering slot 0
+      if (record.frameIndex === 0) {
+        this.portalUI?.dispose();
+        this.portalUI = null;
+      }
 
       // Make floor invisible but keep it raycastable for IWSDK locomotion
       if (this.floorEntity?.object3D) {
@@ -549,57 +620,64 @@ class PhotoMuseumApp {
         }
       }
 
-      // Hide museum drawings, voice notes, and invite link; splat ones will be shown as they're created
+      // Hide museum drawings, voice notes, and invite link
       hideAllAnnotations();
-      showVoiceNotesInContext(ctx); // hides museum, shows this splat (initially empty)
-      showDrawingsInContext(ctx);   // hides museum, shows this splat (initially empty)
+      showVoiceNotesInContext(ctx);
+      showDrawingsInContext(ctx);
       if (this.inviteLinkMesh) this.inviteLinkMesh.visible = false;
       this.currentSplatContext = ctx;
-
-      // Switch creative input to splat context so new items are tagged correctly
       this.creativeInput?.setContext(ctx);
 
-      // Load splat
+      // Load splat with per-slot rotation/scale
       this.gaussianSplatWorld = new GaussianSplatWorld(this.world);
-      await this.gaussianSplatWorld.loadSplat(result.spzUrl);
+      await this.gaussianSplatWorld.loadSplat(record.spzUrl, {
+        rotationPreset: record.rotationPreset,
+        scale: record.scale,
+      });
 
       console.log('[SplatWorld] Splat loaded successfully');
 
-      // Position player at splat origin via locomotor.teleport()
+      // Spawn in-world orientation/scale adjust panel (only for slots 1-17)
+      if (record.frameIndex !== 0) {
+        this.adjustPanel = createSplatAdjustPanel(
+          this.world,
+          this.world.camera,
+          this.gaussianSplatWorld,
+          (preset, scale) => this.saveSlotFix(record.frameIndex, preset, scale),
+        );
+      }
+
       const locomotor = this.getLocomotor();
       if (locomotor) {
         locomotor.teleport(new THREE.Vector3(0, 1.6, 0));
       }
 
       // Stop ALL locomotion systems (slide + teleport + turn).
-      // They may be registered as separate systems, so stopping just
-      // LocomotionSystem isn't enough — TeleportSystem would still show
-      // its arc/reticle, and SlideSystem would fight with flyPosition.
       for (const sys of this.getLocomotionSystemsToStop()) sys.stop();
 
       this.inSplatWorld = true;
       this.updateAvatarVisibilityForContext();
 
-      // Show "Return to Museum" button and vertical buttons in flat mode
       this.flatMode?.setReturnButtonVisible(true);
       this.flatMode?.setVerticalButtonsVisible(true);
 
     } catch (err) {
       console.error('[SplatWorld] Failed to enter splat world:', err);
+      this.currentSplatFrameIndex = null;
     }
   }
 
   private exitSplatWorld(): void {
-    // Re-enable full locomotion (slide + teleport + turn) for the gallery
     for (const sys of this.getLocomotionSystemsToStop()) sys.play();
 
-    // Dispose splat
+    this.adjustPanel?.dispose();
+    this.adjustPanel = null;
+
     this.gaussianSplatWorld?.dispose();
     this.gaussianSplatWorld = null;
 
     // Re-show museum entities
     if (this.roomEntity?.object3D) this.roomEntity.object3D.visible = true;
-    // Restore floor visibility
     if (this.floorEntity?.object3D) {
       const floorMesh = this.floorEntity.object3D as THREE.Mesh;
       if (floorMesh.material && 'opacity' in floorMesh.material) {
@@ -610,53 +688,377 @@ class PhotoMuseumApp {
     for (const entity of this.frameEntities) {
       if (entity.object3D) entity.object3D.visible = true;
     }
-    if (this.portalFrame) this.portalFrame.group.visible = true;
 
-    // Restore museum drawings, annotations, voice notes, and invite link; hide splat ones
+    // Re-show all portal frames
+    if (this.portalFrame) this.portalFrame.group.visible = true;
+    for (const [, pfh] of this.portalFrameHandlesByFrame) pfh.group.visible = true;
+
+    // Re-show all PortalUI handles (hidden on enter; slot 0's may be null if we entered slot 0)
+    this.portalUI?.setVisible(true);
+    for (const [, slotUI] of this.portalUIHandlesByFrame) slotUI.setVisible(true);
+
     showAllAnnotations();
     showVoiceNotesInContext('museum');
     showDrawingsInContext('museum');
     if (this.inviteLinkMesh) this.inviteLinkMesh.visible = true;
-
-    // Switch creative input back to museum context
     this.creativeInput?.setContext('museum');
     this.currentSplatContext = null;
 
-    // Re-create portal UI — splat is cached now so go straight to "Enter World"
+    // Restore the PortalUI for whichever frame we just exited
+    const exitedFrameIndex = this.currentSplatFrameIndex;
+    this.currentSplatFrameIndex = null;
     const framePositions = generateFramePositions(18);
-    const portalPos = framePositions[0];
-    this.portalUI = createPortalUI(
-      this.world,
-      portalPos.position,
-      portalPos.rotation,
-      this.PORTAL_IMAGE_NAME,
-      this.cachedSplatResult ? 'enter' : 'generate',
-    );
 
-    // Reposition player in front of portal frame via locomotor.teleport()
-    // so the locomotor's internal state is updated (prevents it from
-    // overwriting player.position on the next frame).
+    let returnPos: THREE.Vector3;
+    if (exitedFrameIndex === null || exitedFrameIndex === 0) {
+      // Slot 0 legacy path
+      const portalPos = framePositions[0];
+      this.portalUI = createPortalUI(
+        this.world,
+        portalPos.position,
+        portalPos.rotation,
+        this.PORTAL_IMAGE_NAME,
+        this.cachedSplatResult ? 'enter' : 'generate',
+        { withTrash: false },
+      );
+      returnPos = new THREE.Vector3(portalPos.position.x, 1.6, portalPos.position.z + 2);
+    } else {
+      // Slot 1-17: re-create PortalUI in 'enter' state
+      const record = this.portalWorldsByFrame.get(exitedFrameIndex);
+      const slotPos = framePositions[exitedFrameIndex];
+      if (record) {
+        const slotUI = createPortalUI(
+          this.world,
+          slotPos.position,
+          slotPos.rotation,
+          record.imageName,
+          'enter',
+        );
+        this.portalUIHandlesByFrame.set(exitedFrameIndex, slotUI);
+      }
+      returnPos = new THREE.Vector3(slotPos.position.x, 1.6, slotPos.position.z + 2);
+    }
+
     const locomotor = this.getLocomotor();
     if (locomotor) {
-      locomotor.teleport(new THREE.Vector3(portalPos.position.x, 1.6, portalPos.position.z + 2));
+      locomotor.teleport(returnPos);
     } else {
-      // Fallback if locomotor not found
       const player = (this.world as any).player;
-      if (player?.position) player.position.set(portalPos.position.x, 1.6, portalPos.position.z + 2);
+      if (player?.position) player.position.copy(returnPos);
     }
 
     this.inSplatWorld = false;
     this.updateAvatarVisibilityForContext();
 
-    // Hide "Return to Museum" button and vertical buttons in flat mode
     this.flatMode?.setReturnButtonVisible(false);
     this.flatMode?.setVerticalButtonsVisible(false);
 
-    // Reset flat mode position to in front of portal
     if (this.flatMode) {
-      const fps = generateFramePositions(18);
-      const pp = fps[0];
-      this.flatPosition.set(pp.position.x, 1.6, pp.position.z + 2);
+      this.flatPosition.copy(returnPos);
+    }
+  }
+
+  // ── Generalized asset pipeline ──
+
+  /** Helper: find frame entity by frameIndex. */
+  private getFrameEntity(frameIndex: number): Entity | undefined {
+    return this.frameEntities.find(
+      e => (e.object3D as THREE.Group)?.userData.frameIndex === frameIndex,
+    );
+  }
+
+  /** Open the world-space photo picker for the given slot. */
+  private openPhotoPicker(frameIndex: number): void {
+    if (this.targetedFrameIndex === frameIndex && this.photoPicker) return;
+    this.photoPicker?.dispose();
+    this.photoPicker = null;
+    this.targetedFrameIndex = frameIndex;
+
+    const frameEntity = this.getFrameEntity(frameIndex);
+    if (!frameEntity) return;
+    const fg = frameEntity.object3D as THREE.Group;
+
+    this.photoPicker = createPhotoPicker(
+      this.world,
+      fg.position.clone(),
+      fg.rotation.clone(),
+      this.googleAuth,
+      this.photosService,
+      {
+        onSelect: (photoUrl, photoId, photoName) => {
+          this.onPhotoSelected(frameIndex, photoUrl, photoId, photoName);
+        },
+        onGoogleSignIn: () => {
+          this.googleAuth.initiateLogin();
+        },
+        onCancel: () => {
+          this.photoPicker?.dispose();
+          this.photoPicker = null;
+          this.targetedFrameIndex = null;
+        },
+      },
+    );
+  }
+
+  /** Called once a photo is chosen from the picker. */
+  private async onPhotoSelected(
+    frameIndex: number,
+    photoUrl: string,
+    photoId: string,
+    photoName: string,
+  ): Promise<void> {
+    this.photoPicker?.dispose();
+    this.photoPicker = null;
+    this.targetedFrameIndex = null;
+
+    const frameEntity = this.getFrameEntity(frameIndex);
+    if (!frameEntity) return;
+
+    await setFramePhoto(this.world, frameEntity, photoUrl, photoId);
+
+    // Stash photo metadata on userData so startSlotGeneration can read it
+    const fg = frameEntity.object3D as THREE.Group;
+    fg.userData.currentPhotoUrl = photoUrl;
+    fg.userData.currentPhotoId = photoId;
+    fg.userData.currentPhotoName = photoName;
+
+    // Create or replace PortalUI for this slot in 'generate' state
+    this.portalUIHandlesByFrame.get(frameIndex)?.dispose();
+    const framePositions = generateFramePositions(18);
+    const slotUI = createPortalUI(
+      this.world,
+      framePositions[frameIndex].position,
+      framePositions[frameIndex].rotation,
+      photoName,
+      'generate',
+    );
+    if (this.inSplatWorld) slotUI.setVisible(false);
+    this.portalUIHandlesByFrame.set(frameIndex, slotUI);
+  }
+
+  /** Start generating a World Labs splat for a slot (slots 1-17). */
+  private async startSlotGeneration(frameIndex: number): Promise<void> {
+    if (this.generatingFrameIndices.has(frameIndex)) return;
+
+    const frameEntity = this.getFrameEntity(frameIndex);
+    if (!frameEntity) return;
+    const fg = frameEntity.object3D as THREE.Group;
+    let imageUrl = fg?.userData.currentPhotoUrl as string | undefined;
+    const imageName = fg?.userData.currentPhotoName as string | undefined;
+    if (!imageUrl) return;
+
+    this.generatingFrameIndices.add(frameIndex);
+
+    // blob: URLs are local-only — upload to server first so World Labs can fetch them
+    if (imageUrl.startsWith('blob:')) {
+      try {
+        const hostedUrl = await this.worldLabsService.uploadBlobPhoto(imageUrl, imageName ?? 'photo.jpg');
+        fg.userData.currentPhotoUrl = hostedUrl;
+        imageUrl = hostedUrl;
+      } catch (err) {
+        console.error('[Pipeline] Photo upload failed:', err);
+        this.generatingFrameIndices.delete(frameIndex);
+        return;
+      }
+    }
+
+    const record: PortalWorldRecord = {
+      frameIndex,
+      imageUrl,
+      imageName: imageName ?? 'My World',
+      photoId: fg?.userData.currentPhotoId as string ?? '',
+      state: 'waiting',
+      startedAt: Date.now(),
+      estimatedDurationMs: 60_000,
+      rotationPreset: 1,
+      scale: 1.5,
+    };
+    this.portalWorldsByFrame.set(frameIndex, record);
+    this.multiplayer.addPortalWorld(record);
+
+    const framePositions = generateFramePositions(18);
+    const slotPos = framePositions[frameIndex];
+
+    const slotUI = this.portalUIHandlesByFrame.get(frameIndex);
+    slotUI?.startCountdown(60_000);
+
+    try {
+      const genResult = await this.worldLabsService.startGeneration(imageUrl, record.imageName);
+
+      if ('spzUrl' in genResult) {
+        // Cache hit — immediately ready
+        record.state = 'ready';
+        record.spzUrl = genResult.spzUrl;
+        record.colliderMeshUrl = genResult.colliderMeshUrl;
+        this.portalWorldsByFrame.set(frameIndex, record);
+        this.multiplayer.updatePortalWorld(record);
+        slotUI?.setState('enter');
+      } else {
+        record.operationId = genResult.operationId;
+        slotUI?.startCountdown(genResult.estimatedDurationMs);
+        this.multiplayer.updatePortalWorld(record);
+
+        const result = await this.worldLabsService.pollUntilDone(genResult.operationId, imageUrl);
+        record.state = 'ready';
+        record.spzUrl = result.spzUrl;
+        record.colliderMeshUrl = result.colliderMeshUrl;
+        this.portalWorldsByFrame.set(frameIndex, record);
+        this.multiplayer.updatePortalWorld(record);
+        slotUI?.setState('enter');
+      }
+    } catch (err) {
+      console.error(`[Pipeline] Generation failed for slot ${frameIndex}:`, err);
+      // Revert to photo state
+      this.portalWorldsByFrame.delete(frameIndex);
+      this.multiplayer.removePortalWorld(frameIndex);
+      slotUI?.setState('generate');
+    } finally {
+      this.generatingFrameIndices.delete(frameIndex);
+    }
+  }
+
+  /** Enter the generated splat world for a specific slot (slots 1-17). */
+  private enterSlotSplat(frameIndex: number): void {
+    const record = this.portalWorldsByFrame.get(frameIndex);
+    if (!record || record.state !== 'ready' || !record.spzUrl) return;
+    this.enterSplatForRecord(record);
+  }
+
+  /** Persist the orientation/scale fix from the adjust panel to the record. */
+  private saveSlotFix(frameIndex: number, preset: number, scale: number): void {
+    const record = this.portalWorldsByFrame.get(frameIndex);
+    if (!record) return;
+    record.rotationPreset = preset;
+    record.scale = scale;
+    this.multiplayer.updatePortalWorld(record);
+    console.log(`[Pipeline] Slot ${frameIndex} fix saved: preset=${preset} scale=${scale}`);
+  }
+
+  /** Show the YES/NO trash confirmation dialog for a slot. */
+  private openTrashConfirm(frameIndex: number): void {
+    // Only one dialog per frame at a time
+    if (this.trashDialogsByFrame.has(frameIndex)) return;
+
+    const framePositions = generateFramePositions(18);
+    const slotPos = framePositions[frameIndex];
+    const dialog = createTrashConfirmDialog(
+      this.world,
+      slotPos.position,
+      slotPos.rotation,
+    );
+    this.trashDialogsByFrame.set(frameIndex, dialog);
+  }
+
+  /** Execute the trash action for a slot: clear server cache, notify peers, reset to empty. */
+  private confirmDelete(frameIndex: number): void {
+    const record = this.portalWorldsByFrame.get(frameIndex);
+
+    // Best-effort server cache clear
+    if (record) {
+      this.worldLabsService.deleteCache(record.imageUrl).catch(() => {});
+      this.multiplayer.removePortalWorld(frameIndex);
+    }
+
+    // Dispose PortalUI + PortalFrame
+    this.portalUIHandlesByFrame.get(frameIndex)?.dispose();
+    this.portalUIHandlesByFrame.delete(frameIndex);
+    this.portalFrameHandlesByFrame.get(frameIndex)?.dispose();
+    this.portalFrameHandlesByFrame.delete(frameIndex);
+    this.portalWorldsByFrame.delete(frameIndex);
+
+    // Reset frame to empty "+"
+    const frameEntity = this.getFrameEntity(frameIndex);
+    if (frameEntity) {
+      const fg = frameEntity.object3D as THREE.Group;
+      const photoCanvas = fg.getObjectByName('photoCanvas') as THREE.Mesh | undefined;
+      if (photoCanvas) photoCanvas.visible = true;
+      setFrameEmpty(frameEntity);
+      fg.userData.currentPhotoUrl = undefined;
+      fg.userData.currentPhotoId = undefined;
+      fg.userData.currentPhotoName = undefined;
+    }
+  }
+
+  /** Apply a portal world record from a remote peer (upsert, idempotent). */
+  private async applyRemotePortalWorld(record: PortalWorldRecord): Promise<void> {
+    // Don't stomp on a locally-initiated generation in progress
+    if (this.generatingFrameIndices.has(record.frameIndex)) return;
+
+    this.portalWorldsByFrame.set(record.frameIndex, record);
+
+    const frameEntity = this.getFrameEntity(record.frameIndex);
+    if (!frameEntity) return;
+    const fg = frameEntity.object3D as THREE.Group;
+
+    // Ensure the photo texture is applied to the frame (idempotent by URL)
+    if (fg?.userData.currentPhotoUrl !== record.imageUrl) {
+      await setFramePhoto(this.world, frameEntity, record.imageUrl, record.photoId);
+      fg.userData.currentPhotoUrl = record.imageUrl;
+      fg.userData.currentPhotoId = record.photoId;
+      fg.userData.currentPhotoName = record.imageName;
+    }
+
+    // Lazily create PortalUI
+    const framePositions = generateFramePositions(18);
+    const slotPos = framePositions[record.frameIndex];
+    if (!this.portalUIHandlesByFrame.has(record.frameIndex)) {
+      const slotUI = createPortalUI(
+        this.world,
+        slotPos.position,
+        slotPos.rotation,
+        record.imageName,
+        'generate',
+      );
+      if (this.inSplatWorld) slotUI.setVisible(false);
+      this.portalUIHandlesByFrame.set(record.frameIndex, slotUI);
+    }
+
+    // Sync PortalUI to record state
+    const slotUI = this.portalUIHandlesByFrame.get(record.frameIndex)!;
+    if (record.state === 'waiting') {
+      const remaining = (record.startedAt ?? 0) + (record.estimatedDurationMs ?? 60_000) - Date.now();
+      if (remaining > 0) {
+        slotUI.startCountdown(remaining);
+      } else {
+        slotUI.setState('waiting');
+      }
+    } else if (record.state === 'ready') {
+      slotUI.setState('enter');
+    }
+  }
+
+  /** Remove a portal world record that was deleted by a remote peer. */
+  private applyRemotePortalWorldRemoved(frameIndex: number): void {
+    this.portalUIHandlesByFrame.get(frameIndex)?.dispose();
+    this.portalUIHandlesByFrame.delete(frameIndex);
+
+    this.portalFrameHandlesByFrame.get(frameIndex)?.dispose();
+    this.portalFrameHandlesByFrame.delete(frameIndex);
+
+    this.portalWorldsByFrame.delete(frameIndex);
+
+    const frameEntity = this.getFrameEntity(frameIndex);
+    if (frameEntity) {
+      const fg = frameEntity.object3D as THREE.Group;
+      const photoCanvas = fg.getObjectByName('photoCanvas') as THREE.Mesh | undefined;
+      if (photoCanvas) photoCanvas.visible = true;
+      setFrameEmpty(frameEntity);
+      fg.userData.currentPhotoUrl = undefined;
+      fg.userData.currentPhotoId = undefined;
+      fg.userData.currentPhotoName = undefined;
+    }
+  }
+
+  /** Update trash button enabled state based on whether any user (local or remote) is in that splat. */
+  private updateTrashOccupancy(): void {
+    for (const [fIdx, slotUI] of this.portalUIHandlesByFrame) {
+      const record = this.portalWorldsByFrame.get(fIdx);
+      if (!record) continue;
+      const splatCtx = `splat:${record.imageUrl}`;
+      const occupied =
+        this.currentSplatFrameIndex === fIdx ||
+        [...this.multiplayer.getRemoteUsers().values()].some(u => u.context === splatCtx);
+      slotUI.setTrashEnabled(!occupied);
     }
   }
 
@@ -813,16 +1215,33 @@ class PhotoMuseumApp {
           this.updateNameTagFacing(camera);
           this.portalFrame?.updateParallax(camera);
           this.portalUI?.updateCountdown();
+          for (const [, slotUI] of this.portalUIHandlesByFrame) slotUI.updateCountdown();
+          this.updateTrashOccupancy();
 
           // Raycast interaction: reticle → tap anywhere
           this._flatRaycaster.setFromCamera(this._screenCenter, camera);
 
-          // Reticle hover feedback — portal button OR voice note sphere
+          // Reticle hover feedback — portal button, slot UIs, plus markers, or voice note spheres
           const buttonMesh = this.portalUI?.getButtonMesh();
           const voiceSpheresFlat = getVoiceNoteSpheres();
           let reticleActive = false;
           if (buttonMesh) {
             reticleActive = this._flatRaycaster.intersectObject(buttonMesh).length > 0;
+          }
+          if (!reticleActive) {
+            for (const [, slotUI] of this.portalUIHandlesByFrame) {
+              if (this._flatRaycaster.intersectObject(slotUI.getButtonMesh()).length > 0) {
+                reticleActive = true; break;
+              }
+            }
+          }
+          if (!reticleActive) {
+            for (const fe of this.frameEntities) {
+              const pm = (fe.object3D as THREE.Group)?.userData.plusMarker as SlotPlusMarkerHandle | undefined;
+              if (pm?.mesh.visible && this._flatRaycaster.intersectObject(pm.mesh).length > 0) {
+                reticleActive = true; break;
+              }
+            }
           }
           if (!reticleActive && voiceSpheresFlat.length > 0) {
             reticleActive = this._flatRaycaster.intersectObjects(voiceSpheresFlat).length > 0;
@@ -834,6 +1253,41 @@ class PhotoMuseumApp {
             this.generateSplatWorld();
           } else if (pressed === 'enter') {
             this.enterSplatWorld();
+          }
+
+          // Check "+" press + slot PortalUI press on slots 1-17
+          for (const frameEntity of this.frameEntities) {
+            const fg = frameEntity.object3D as THREE.Group;
+            const pm = fg?.userData.plusMarker as SlotPlusMarkerHandle | undefined;
+            if (pm?.checkRaycastPress(this._flatRaycaster, flatInput.interactPressed)) {
+              const idx = fg?.userData.frameIndex as number;
+              this.openPhotoPicker(idx);
+            }
+            const fIdx = fg?.userData.frameIndex as number;
+            const slotUI = this.portalUIHandlesByFrame.get(fIdx);
+            if (slotUI) {
+              const sp = slotUI.checkRaycastPress(this._flatRaycaster, flatInput.interactPressed);
+              if (sp === 'generate') this.startSlotGeneration(fIdx);
+              else if (sp === 'enter') this.enterSlotSplat(fIdx);
+              if (slotUI.checkTrashRaycastPress(this._flatRaycaster, flatInput.interactPressed)) {
+                this.openTrashConfirm(fIdx);
+              }
+            }
+          }
+          // PhotoPicker gets its own raycast checks
+          this.photoPicker?.checkRaycastPress(this._flatRaycaster, flatInput.interactPressed);
+
+          // Trash confirm dialogs
+          for (const [fIdx, dialog] of this.trashDialogsByFrame) {
+            const ans = dialog.checkRaycastPress(this._flatRaycaster, flatInput.interactPressed);
+            if (ans === 'yes') {
+              dialog.dispose();
+              this.trashDialogsByFrame.delete(fIdx);
+              this.confirmDelete(fIdx);
+            } else if (ans === 'no') {
+              dialog.dispose();
+              this.trashDialogsByFrame.delete(fIdx);
+            }
           }
 
           // Voice note playback in flat mode
@@ -850,8 +1304,12 @@ class PhotoMuseumApp {
           updateVoiceNoteFacing(camera);
           this.updateNameTagFacing(camera);
 
-          // Voice note raycast + reticle in splat world (same as museum branch)
+          // Adjust panel update + interaction
+          this.adjustPanel?.update(camera);
           this._flatRaycaster.setFromCamera(this._screenCenter, camera);
+          this.adjustPanel?.checkRaycastPress(this._flatRaycaster, flatInput.interactPressed);
+
+          // Voice note raycast + reticle in splat world (same as museum branch)
           const voiceSpheresSplat = getVoiceNoteSpheres();
           const reticleActiveSplat = voiceSpheresSplat.length > 0 &&
             this._flatRaycaster.intersectObjects(voiceSpheresSplat).length > 0;
@@ -876,12 +1334,46 @@ class PhotoMuseumApp {
           this.updateNameTagFacing(camera);
           this.portalFrame?.updateParallax(camera);
           this.portalUI?.updateCountdown();
+          for (const [, slotUI] of this.portalUIHandlesByFrame) slotUI.updateCountdown();
 
           const pressed = this.portalUI?.checkPress(this.world);
           if (pressed === 'generate') {
             this.generateSplatWorld();
           } else if (pressed === 'enter') {
             this.enterSplatWorld();
+          }
+
+          // Check "+" press + slot PortalUI press on slots 1-17
+          for (const frameEntity of this.frameEntities) {
+            const fg = frameEntity.object3D as THREE.Group;
+            const pm = fg?.userData.plusMarker as SlotPlusMarkerHandle | undefined;
+            if (pm?.checkPress(this.world)) {
+              const idx = fg?.userData.frameIndex as number;
+              this.openPhotoPicker(idx);
+            }
+            const fIdx = fg?.userData.frameIndex as number;
+            const slotUI = this.portalUIHandlesByFrame.get(fIdx);
+            if (slotUI) {
+              const sp = slotUI.checkPress(this.world);
+              if (sp === 'generate') this.startSlotGeneration(fIdx);
+              else if (sp === 'enter') this.enterSlotSplat(fIdx);
+              if (slotUI.checkTrashPress(this.world)) this.openTrashConfirm(fIdx);
+            }
+          }
+          // PhotoPicker XR press
+          this.photoPicker?.checkPress(this.world);
+
+          // Trash confirm dialogs (XR)
+          for (const [fIdx, dialog] of this.trashDialogsByFrame) {
+            const ans = dialog.checkPress(this.world);
+            if (ans === 'yes') {
+              dialog.dispose();
+              this.trashDialogsByFrame.delete(fIdx);
+              this.confirmDelete(fIdx);
+            } else if (ans === 'no') {
+              dialog.dispose();
+              this.trashDialogsByFrame.delete(fIdx);
+            }
           }
 
           // Voice note playback: controller touch
@@ -896,6 +1388,10 @@ class PhotoMuseumApp {
           updateVoiceNoteFacing(camera);
           this.updateNameTagFacing(camera);
           this.handleVoiceNoteXRInteraction();
+
+          // Adjust panel update + XR tip press
+          this.adjustPanel?.update(camera);
+          this.adjustPanel?.checkPress(this.world);
 
           this.gaussianSplatWorld?.update(delta);
 
