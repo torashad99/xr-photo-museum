@@ -733,7 +733,7 @@ io.on('connection', (socket: Socket) => {
 });
 
 const PORT = process.env.PORT || 3001;
-httpServer.listen(PORT, () => {
+httpServer.listen(Number(PORT), '0.0.0.0', () => {
   console.log(`Server running on port ${PORT}`);
   if (IS_DEV) console.log('World Labs debug logging ENABLED');
 
