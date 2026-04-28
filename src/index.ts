@@ -620,6 +620,11 @@ class PhotoMuseumApp {
         }
       }
 
+      // Dismiss photo picker if open
+      this.photoPicker?.dispose();
+      this.photoPicker = null;
+      this.targetedFrameIndex = null;
+
       // Hide museum drawings, voice notes, and invite link
       hideAllAnnotations();
       showVoiceNotesInContext(ctx);
@@ -782,14 +787,9 @@ class PhotoMuseumApp {
       this.world,
       fg.position.clone(),
       fg.rotation.clone(),
-      this.googleAuth,
-      this.photosService,
       {
         onSelect: (photoUrl, photoId, photoName) => {
           this.onPhotoSelected(frameIndex, photoUrl, photoId, photoName);
-        },
-        onGoogleSignIn: () => {
-          this.googleAuth.initiateLogin();
         },
         onCancel: () => {
           this.photoPicker?.dispose();
