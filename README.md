@@ -1,14 +1,5 @@
-# IWSDK Starter Template
+# Immersive WebXR Photo Museum
 
-This folder is a source template used by `scripts/generate-starters.cjs` to produce 8 runnable variants:
+More info here - https://papaya-longma-d02e97.netlify.app/
 
-- `starter-<vr|ar>-<manual|metaspatial>-<ts|js>`
-
-Do not run this template directly. The generator will:
-
-- Copy a variant-specific `src/index.ts` (see `src/index-*.ts`).
-- Install the matching Vite config from `configs/`.
-- Keep only the required metaspatial folder (renamed to `metaspatial`).
-- Prune unused assets and dev dependencies.
-
-UI is defined in `ui/welcome.uikitml`; the Vite UIKitML plugin compiles it to `public/ui/welcome.json` during build in generated variants.
+Developed by Mohammed Rashad, using IWSDK, Three.js, Spark.js and Socket.IO. Gaussian Splats powered by World Labs.
