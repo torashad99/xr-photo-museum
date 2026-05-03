@@ -14,9 +14,9 @@ An immersive multiplayer WebXR photo gallery built with Meta's [IWSDK](https://i
 - **Portal frames** — click "Enter World" to transform 2D photos into immersive 3D Gaussian Splat environments
 
 ### 📸 Photo Sources
-- **Google Photos integration** — OAuth login and browse your Google Photos library
 - **Local file upload** — drag-and-drop or select images from your device (25 MB limit)
 - **Gaussian Splat generation** — World Labs Marble API converts photos into interactive 3D splats
+- ⚠️ **Google Photos integration** — OAuth flow is not yet fully implemented and is currently hidden from the UI
 
 ### 🎨 Creative Tools
 - **Annotations** — add text labels and comments to photos
@@ -40,11 +40,45 @@ An immersive multiplayer WebXR photo gallery built with Meta's [IWSDK](https://i
 - **Node.js** ≥ 24.11.1
 - **npm** (comes with Node.js)
 - **SSL/TLS** (localhost certificate via mkcert, auto-generated during first run)
+- **World Labs API Key** — required for Gaussian Splat generation
 - **Optional**: Meta Quest device or VR-capable browser for XR features
 
 ---
 
+## Setup
+
+### 1. Get API Keys
+
+**World Labs Marble API:**
+1. Visit [https://platform.worldlabs.ai/](https://platform.worldlabs.ai/)
+2. Sign up or log in
+3. Create an API key in your account settings
+4. Copy the key for the next step
+
+### 2. Create `.env` File
+
+In the project root, create a `.env` file with your API keys and optional configuration:
+
+```env
+# Required
+WORLD_LABS_API_KEY=your-api-key-here
+
+# Optional: Lock the server to a single room (leave empty or comment out to allow any room)
+LINK_ROOM=
+
+# Optional: Google Photos integration (OAuth flow) — NOT YET IMPLEMENTED
+# GOOGLE_CLIENT_ID=your-client-id-here
+# GOOGLE_CLIENT_SECRET=your-client-secret-here
+
+# Optional: Production environment
+NODE_ENV=development
+```
+
+---
+
 ## Local Deployment
+
+**Prerequisites:** Complete the [Setup](#setup) section above to get your World Labs API key and create a `.env` file.
 
 ### 1. Install Dependencies
 
@@ -90,6 +124,8 @@ Click the "Enter XR" button in the UI to start a VR session. On Quest, this will
 
 ## Production Build
 
+**Prerequisites:** Complete the [Setup](#setup) section above to get your World Labs API key and create a `.env` file.
+
 ### Build for Deployment
 
 ```bash
@@ -106,6 +142,7 @@ npm run start
 
 - Serves both static files (`dist/`) and Socket.IO on `http://localhost:3000`
 - Ready for deployment to any Node.js hosting platform
+- Ensure all environment variables from `.env` are available on the production server
 
 ---
 
@@ -179,10 +216,12 @@ The app is production-ready and can be deployed to:
 
 Example production environment variables:
 ```env
-GOOGLE_CLIENT_ID=your-client-id
-GOOGLE_CLIENT_SECRET=your-client-secret
 WORLD_LABS_API_KEY=your-api-key
 NODE_ENV=production
+
+# Google Photos OAuth is not yet implemented
+# GOOGLE_CLIENT_ID=your-client-id
+# GOOGLE_CLIENT_SECRET=your-client-secret
 ```
 
 ---
