@@ -174,7 +174,7 @@ Creates a `.link-room` marker file and always serves the same room across sessio
 |--------|---------|
 | Move | Left thumbstick (slide locomotion) |
 | Turn | Right thumbstick (snap or smooth turn) |
-| Teleport | Point right controller and press right thumbstick down  |
+| Teleport | Point right controller and move right thumbstick down  |
 | Interact with buttons | Move controller tip into a button (proximity-based) |
 | Record voice note | Hold **left trigger** — release to place at hand position |
 | Draw in 3D | Hold **right trigger** — move hand to draw strokes |
