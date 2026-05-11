@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>XR Photo Museum — Immersive WebXR Photo Gallery</title>
+  <title>Photo to World - Immersive WebXR Photo Museum</title>
   <meta name="description" content="An immersive WebXR photo gallery with AI-generated 3D worlds, real-time multiplayer, 3D annotations, and full mobile support. No app download required.">
   <style>
     /* ── Reset ── */
@@ -303,6 +303,37 @@
     .footer-note a { color: rgba(226,232,240,0.48); text-decoration: none; transition: color 0.2s; }
     .footer-note a:hover { background: linear-gradient(90deg, #f87171, #fbbf24, #34d399, #60a5fa, #a78bfa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
 
+    .github-link-wrapper {
+      margin: 3rem 0 2rem;
+      text-align: center;
+    }
+    .github-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.75rem 1.5rem;
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 9999px;
+      color: rgba(226,232,240,0.9);
+      text-decoration: none;
+      font-size: 0.88rem;
+      font-weight: 600;
+      transition: all 0.2s ease;
+    }
+    .github-link:hover {
+      background: rgba(255,255,255,0.08);
+      border-color: rgba(255,255,255,0.2);
+      transform: translateY(-2px);
+    }
+    .github-link svg {
+      fill: currentColor;
+    }
+    .github-link-license {
+      opacity: 0.5;
+      font-weight: 400;
+    }
+
     /* ── Responsive ── */
     @media (max-width: 900px) {
       .card, .card--7, .card--5 { grid-column: span 12 !important; }
@@ -323,7 +354,7 @@
     <div class="hero-bg"></div>
     <div class="hero-content">
       <!-- <div class="hero-badge">Now Available · WebXR Experience</div> -->
-      <h1 class="hero-title">XR Photo Museum</h1>
+      <h1 class="hero-title">Photo to World - Immersive WebXR Photo Museum</h1>
       <p class="hero-tagline">Step inside your memories. Explore AI-generated 3D worlds built from your photos. Share the experience with anyone, anywhere — no headset required.</p>
       <div class="hero-props">
         <span class="prop">🥽 Meta Quest Ready</span>
@@ -360,7 +391,7 @@
         <div class="card-body">
           <span class="card-tag">WebXR · IWSDK</span>
           <h2 class="card-title">Built for the Open Web</h2>
-          <p class="card-desc">No app store. No installation. Built on Meta's Immersive Web SDK (IWSDK) and Three.js, XR Photo Museum runs directly in any WebXR-capable browser. Visit a URL, click Enter XR, and you're inside — on Quest Browser, Chrome, Safari, Firefox or any WebXR runtime.</p>
+          <p class="card-desc">No app store. No installation. Built on Meta's Immersive Web SDK (IWSDK) and Three.js, Photo to World - Immersive WebXR Photo Museum runs directly in any WebXR-capable browser. Visit a URL, click Enter XR, and you're inside — on Quest Browser, Chrome, Safari, Firefox or any WebXR runtime.</p>
         </div>
       </article>
 
@@ -372,7 +403,7 @@
         <div class="card-body">
           <span class="card-tag">Museum Room</span>
           <h2 class="card-title">Your Gallery, in 3D</h2>
-          <p class="card-desc">Explore a 20×20 metre virtual gallery with distinct colored walls — red, green, blue, and orange — and 18 individually lit photo display frames. Fill them with your Photos via Google (Coming Soon)</p>
+          <p class="card-desc">Explore a 20×20 metre virtual gallery with distinct colored walls — red, green, blue, and orange — and 18 individually lit photo display frames. Fill them with your Photos via your device (Available now from iOS/Android/Desktop (.jpg only)) or Google (Coming Soon)</p>
         </div>
       </article>
 
@@ -384,7 +415,7 @@
         <div class="card-body">
           <span class="card-tag">Portal Frame</span>
           <h2 class="card-title">A Window to Another Dimension</h2>
-          <p class="card-desc">A special parallax-effect portal frame sits at the gallery's heart — shifting in depth as you move, beckoning you into a world beyond.</p>
+          <p class="card-desc">A special parallax-effect portal frame sits at the gallery's heart — shifting in depth as you move, beckoning you into a world beyond. (Disabled for user-generated images for now)</p>
         </div>
       </article>
 
@@ -396,7 +427,7 @@
         <div class="card-body">
           <span class="card-tag">World Labs API</span>
           <h2 class="card-title">One Tap to Generate a World</h2>
-          <p class="card-desc">Point at the portal and press "Generate World." The World Labs Marble API transforms your photo into a full 3D Gaussian splat — a photorealistic environment you can fly through.</p>
+          <p class="card-desc">Point at the portal, press the '+' button on an empty canvas, select a photo from your local gallery and press "Generate World." The World Labs Marble API transforms your photo into a full 3D Gaussian splat — a photorealistic environment you can fly through.</p>
         </div>
       </article>
 
@@ -444,19 +475,19 @@
         <div class="card-body">
           <span class="card-tag">Flat Mode · Mobile</span>
           <h2 class="card-title">Touch Controls Built-In</h2>
-          <p class="card-desc">On phones and tablets, XR Photo Museum switches to flat mode automatically. A glassmorphic joystick handles movement, screen-drag controls the camera (Minecraft PE-style), and up/down buttons fly in splat worlds — no headset needed.</p>
+          <p class="card-desc">On phones and tablets, Photo to World - Immersive WebXR Photo Museum switches to flat mode automatically. A glassmorphic joystick handles movement, screen-drag controls the camera (Minecraft PE-style), and up/down buttons fly in splat worlds — no headset needed.</p>
         </div>
       </article>
 
       <!-- 9: Multiplayer — span 6 -->
       <article class="card c-teal">
         <div class="card-img-wrap">
-          <img src="img/feature-9.png" alt="Museum room with controllers and portal frame visible from a side angle" loading="lazy">
+          <img src="img/feature-9.jpeg" alt="Splat world with a blue capsule representing another user looking at you with an arrow pointer down and Voice Note annotation next to it" loading="lazy">
         </div>
         <div class="card-body">
           <span class="card-tag">Real-Time Multiplayer</span>
           <h2 class="card-title">Share the Experience</h2>
-          <p class="card-desc">Share an invite link and see each other's avatars appear in the gallery. Multiplayer syncs positions, annotations, drawings, and voice notes in real time via Socket.IO. Passphrase-based rooms — no account required. (Coming Soon)</p>
+          <p class="card-desc">Share an invite link and see each other's avatars appear in the gallery. Multiplayer syncs positions, annotations, drawings, and voice notes in real time via Socket.IO. Passphrase-based rooms — no account required.</p>
         </div>
       </article>
 
@@ -505,8 +536,18 @@
         </div>
       </div>
     </div>
+
+    <div class="github-link-wrapper">
+      <a href="https://github.com/torashad99/xr-photo-museum/" target="_blank" rel="noopener" class="github-link">
+        <svg height="20" aria-hidden="true" viewBox="0 0 16 16" version="1.1" width="20" data-view-component="true">
+          <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path>
+        </svg>
+        <span>Open Sourced on GitHub <span class="github-link-license">(MIT License)</span></span>
+      </a>
+    </div>
+
     <p class="footer-note">
-      XR Photo Museum · Built with <a href="https://iwsdk.dev/" target="_blank" rel="noopener">IWSDK</a> +
+      Photo to World - Immersive WebXR Photo Museum · Built with <a href="https://iwsdk.dev/" target="_blank" rel="noopener">IWSDK</a> +
       <a href="https://threejs.org" target="_blank" rel="noopener">Three.js</a> +
       <a href="https://sparkjs.dev" target="_blank" rel="noopener">SparkJS</a> +
       <a href="https://socket.io" target="_blank" rel="noopener">Socket.IO</a><br>
