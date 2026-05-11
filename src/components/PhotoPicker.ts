@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import { World } from '@iwsdk/core';
 import { getControllerTips } from './InputHelpers';
-import { pickLocalPhoto } from '../services/LocalPhotoPicker';
+import { pickLocalPhotoAuto } from '../services/LocalPhotoPicker';
 
 const PANEL_Z_OFFSET = 1.6;
 const PANEL_W = 2.0;
@@ -181,7 +181,7 @@ export function createPhotoPicker(
   }
 
   async function handleLocalPhoto() {
-    const result = await pickLocalPhoto();
+    const result = await pickLocalPhotoAuto();
     if (!result) return;
     callbacks.onSelect(result.photoUrl, result.photoId, result.photoName);
   }
