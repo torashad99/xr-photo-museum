@@ -147,4 +147,9 @@ export class FlatModeVoiceRecorder {
     this._stopRequested = false;
     return val;
   }
+
+  /** Programmatic stop (e.g., from keyboard shortcut). Mirrors the banner's Stop button. */
+  requestStop(): void {
+    if (this._isRecording) this._stopRequested = true;
+  }
 }

@@ -281,7 +281,11 @@ class PhotoMuseumApp {
 
         this.flatVoiceRecorder = new FlatModeVoiceRecorder(this.world, this.multiplayer, overlayContainer);
         this.flatMode.setOnMicToggle(() => {
-          if (this.flatVoiceRecorder!.isRecording) return; // stop handled via banner button
+          if (this.flatVoiceRecorder!.isRecording) {
+            // Toggle off — same path as the Stop banner button (kept for mobile users)
+            this.flatVoiceRecorder!.requestStop();
+            return;
+          }
           this.flatMode!.setMicActive(true);
           this.flatVoiceRecorder!.startRecording();
         });
@@ -738,6 +742,7 @@ class PhotoMuseumApp {
 
       this.flatMode?.setReturnButtonVisible(true);
       this.flatMode?.setVerticalButtonsVisible(true);
+      this.flatMode?.setInSplatWorld(true);
 
     } catch (err) {
       console.error('[SplatWorld] Failed to enter splat world:', err);
@@ -832,6 +837,7 @@ class PhotoMuseumApp {
 
     this.flatMode?.setReturnButtonVisible(false);
     this.flatMode?.setVerticalButtonsVisible(false);
+    this.flatMode?.setInSplatWorld(false);
 
     if (this.flatMode) {
       this.flatPosition.copy(returnPos);

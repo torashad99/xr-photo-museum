@@ -60,12 +60,25 @@ export class FlatModeOverlay {
   private _onDrawToggle: ((active: boolean) => void) | null = null;
   private _onMicToggle: (() => void) | null = null;
 
+  // Desktop keyboard + mouse
+  private _keys: Set<string> = new Set();
+  private _pointerLocked = false;
+  private _inSplatWorld = false;
+  private _lockLostOverlay: HTMLDivElement;
+  private _isTouchDevice: boolean;
+
   private entryResolve: (() => void) | null = null;
 
   constructor(overlayContainer: HTMLElement) {
     this.container = overlayContainer as HTMLDivElement;
     // Hide controls until user enters
     this.container.classList.add('flat-controls-hidden');
+
+    // "Touch-only" = no precision pointer available. Windows hybrids with both a touchscreen and a
+    // mouse still have `pointer: fine`, so they get the desktop scheme. Pure phones/tablets don't.
+    const hasFinePointer = typeof window.matchMedia === 'function'
+      && window.matchMedia('(pointer: fine)').matches;
+    this._isTouchDevice = !hasFinePointer;
 
     // ── Tap zone (full screen, behind everything) ──
     this.tapZone = this.createDiv('flat-tap-zone');
@@ -77,6 +90,7 @@ export class FlatModeOverlay {
     leftEl.appendChild(leftKnob);
     const leftLabel = this.createDiv('flat-joystick-label');
     leftLabel.textContent = 'Move';
+    leftLabel.appendChild(this.makeKeyHint('WASD'));
     leftEl.appendChild(leftLabel);
     this.container.appendChild(leftEl);
 
@@ -85,11 +99,13 @@ export class FlatModeOverlay {
     // ── Up button ──
     this.upBtn = this.createDiv('flat-vertical-btn flat-vertical-up');
     this.upBtn.textContent = '▲';
+    this.upBtn.appendChild(this.makeKeyHint('↑'));
     this.container.appendChild(this.upBtn);
 
     // ── Down button ──
     this.downBtn = this.createDiv('flat-vertical-btn flat-vertical-down');
     this.downBtn.textContent = '▼';
+    this.downBtn.appendChild(this.makeKeyHint('↓'));
     this.container.appendChild(this.downBtn);
 
     // ── Reticle ──
@@ -101,21 +117,30 @@ export class FlatModeOverlay {
     // ── Return to Museum button ──
     this.returnBtn = this.createDiv('flat-return-btn');
     this.returnBtn.textContent = 'Return to Museum';
+    this.returnBtn.appendChild(this.makeKeyHint('M'));
     this.container.appendChild(this.returnBtn);
 
     // ── Creative toolbar (mic + draw) — mirrors XR: left hand = voice, right hand = draw ──
     this.toolbar = this.createDiv('flat-toolbar');
     this.micBtn = this.createDiv('flat-toolbar-btn');
     this.micBtn.textContent = '🎤'; // microphone
-    this.micBtn.title = 'Voice Note';
+    this.micBtn.title = 'Voice Note (V)';
+    this.micBtn.appendChild(this.makeKeyHint('V'));
     this.toolbar.appendChild(this.micBtn);
 
     this.drawBtn = this.createDiv('flat-toolbar-btn');
     this.drawBtn.textContent = '✏'; // pencil
-    this.drawBtn.title = 'Draw';
+    this.drawBtn.title = 'Draw (B)';
+    this.drawBtn.appendChild(this.makeKeyHint('B'));
     this.toolbar.appendChild(this.drawBtn);
 
     this.container.appendChild(this.toolbar);
+
+    // ── Click-to-resume lock overlay (desktop only) ──
+    this._lockLostOverlay = this.createDiv('flat-lock-lost-overlay');
+    this._lockLostOverlay.textContent = 'Click to resume mouse look (Esc to release)';
+    this._lockLostOverlay.addEventListener('click', () => this.requestPointerLock());
+    this.container.appendChild(this._lockLostOverlay);
 
     // ── Event listeners ──
     this.bindJoystick(this.leftStick);
@@ -123,13 +148,23 @@ export class FlatModeOverlay {
     this.bindVerticalButtons();
     this.bindReturnButton();
     this.bindToolbar();
+    this.bindKeyboard();
+    this.bindMouseLook();
   }
 
   // ── Public API ──
 
   getInput(): FlatModeInput {
+    // Merge keyboard WASD with on-screen joystick: prefer keyboard if it's non-zero.
+    const kbX = (this._keys.has('KeyD') ? 1 : 0) - (this._keys.has('KeyA') ? 1 : 0);
+    const kbY = (this._keys.has('KeyS') ? 1 : 0) - (this._keys.has('KeyW') ? 1 : 0);
+    const usingKb = kbX !== 0 || kbY !== 0;
+    const stick = usingKb
+      ? { x: Math.max(-1, Math.min(1, kbX)), y: Math.max(-1, Math.min(1, kbY)) }
+      : { x: this.leftStick.x, y: this.leftStick.y };
+
     const result: FlatModeInput = {
-      leftStick: { x: this.leftStick.x, y: this.leftStick.y },
+      leftStick: stick,
       lookDelta: { x: this.lookDeltaX, y: this.lookDeltaY },
       verticalInput: this._verticalInput,
       interactPressed: this._interactPressed,
@@ -141,6 +176,16 @@ export class FlatModeOverlay {
     this._interactPressed = false;
     this._returnPressed = false;
     return result;
+  }
+
+  setInSplatWorld(value: boolean): void {
+    this._inSplatWorld = value;
+    if (!value) {
+      // Clear arrow-key vertical state when leaving splat world
+      this._keys.delete('ArrowUp');
+      this._keys.delete('ArrowDown');
+      this.updateVerticalFromKeys();
+    }
   }
 
   setReturnButtonVisible(visible: boolean): void {
@@ -185,7 +230,9 @@ export class FlatModeOverlay {
       splash.appendChild(title);
 
       const subtitle = this.createDiv('flat-entry-subtitle');
-      subtitle.textContent = 'Drag to look around, use joystick to move, tap to interact';
+      subtitle.textContent = this._isTouchDevice
+        ? 'Drag to look around, use joystick to move, tap to interact'
+        : 'Mouse to look, WASD to move, click to interact. Esc releases the mouse.';
       splash.appendChild(subtitle);
 
       const btn = this.createDiv('flat-entry-btn');
@@ -195,6 +242,8 @@ export class FlatModeOverlay {
         e.stopPropagation();
         splash.remove();
         this.container.classList.remove('flat-controls-hidden');
+        // On desktop, the entry click is a user gesture that allows pointer-lock acquisition.
+        if (!this._isTouchDevice) this.requestPointerLock();
         if (this.entryResolve) {
           this.entryResolve();
           this.entryResolve = null;
@@ -207,6 +256,10 @@ export class FlatModeOverlay {
   }
 
   dispose(): void {
+    this._keys.clear();
+    if (this._pointerLocked) {
+      try { document.exitPointerLock(); } catch { /* noop */ }
+    }
     this.container.innerHTML = '';
   }
 
@@ -272,6 +325,8 @@ export class FlatModeOverlay {
 
   private bindTouchLook(): void {
     this.tapZone.addEventListener('pointerdown', (e: PointerEvent) => {
+      // Desktop mouse is handled by the pointer-lock path in bindMouseLook(); keep this for touch/pen only.
+      if (e.pointerType === 'mouse') return;
       const target = e.target as HTMLElement;
       if (target !== this.tapZone) return; // only respond to direct tap zone hits
       if (this.lookPointerId !== null) return; // already tracking a look touch
@@ -386,16 +441,160 @@ export class FlatModeOverlay {
     this.drawBtn.addEventListener('pointerdown', (e: PointerEvent) => {
       e.preventDefault();
       e.stopPropagation();
-      this._drawMode = !this._drawMode;
-      this.drawBtn.classList.toggle('active', this._drawMode);
-      this._onDrawToggle?.(this._drawMode);
+      this.toggleDrawMode();
     });
 
     this.micBtn.addEventListener('pointerdown', (e: PointerEvent) => {
       e.preventDefault();
       e.stopPropagation();
-      this._onMicToggle?.();
+      this.toggleMicMode();
     });
+  }
+
+  private toggleDrawMode(): void {
+    this._drawMode = !this._drawMode;
+    this.drawBtn.classList.toggle('active', this._drawMode);
+    this._onDrawToggle?.(this._drawMode);
+
+    // Desktop: free the cursor while drawing so the user can move the mouse to draw,
+    // then re-lock to the crosshair when they exit draw mode.
+    if (!this._isTouchDevice) {
+      if (this._drawMode) {
+        if (this._pointerLocked) {
+          try { document.exitPointerLock(); } catch { /* noop */ }
+        }
+      } else if (!this.container.classList.contains('flat-controls-hidden')) {
+        this.requestPointerLock();
+      }
+    }
+  }
+
+  private toggleMicMode(): void {
+    this._onMicToggle?.();
+  }
+
+  // ── Desktop keyboard ──
+
+  private bindKeyboard(): void {
+    window.addEventListener('keydown', (e: KeyboardEvent) => this.onKeyDown(e));
+    window.addEventListener('keyup', (e: KeyboardEvent) => this.onKeyUp(e));
+    window.addEventListener('blur', () => {
+      // Release any held keys when window loses focus so user doesn't get stuck moving
+      this._keys.clear();
+      this.updateVerticalFromKeys();
+    });
+  }
+
+  private onKeyDown(e: KeyboardEvent): void {
+    const tag = (document.activeElement as HTMLElement | null)?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+    if (this.container.classList.contains('flat-controls-hidden')) return;
+
+    switch (e.code) {
+      case 'KeyW': case 'KeyA': case 'KeyS': case 'KeyD':
+        this._keys.add(e.code);
+        break;
+      case 'ArrowUp': case 'ArrowDown':
+        if (!this._inSplatWorld) return;
+        e.preventDefault();
+        this._keys.add(e.code);
+        this.updateVerticalFromKeys();
+        break;
+      case 'KeyM':
+        if (!e.repeat && this._inSplatWorld) this._returnPressed = true;
+        break;
+      case 'KeyV':
+        if (!e.repeat) this.toggleMicMode();
+        break;
+      case 'KeyB':
+        if (!e.repeat) this.toggleDrawMode();
+        break;
+    }
+  }
+
+  private onKeyUp(e: KeyboardEvent): void {
+    switch (e.code) {
+      case 'KeyW': case 'KeyA': case 'KeyS': case 'KeyD':
+        this._keys.delete(e.code);
+        break;
+      case 'ArrowUp': case 'ArrowDown':
+        this._keys.delete(e.code);
+        this.updateVerticalFromKeys();
+        break;
+    }
+  }
+
+  private updateVerticalFromKeys(): void {
+    // Only honor arrow keys when in splat world; otherwise leave pointer-event-driven state alone
+    if (!this._inSplatWorld) return;
+    const up = this._keys.has('ArrowUp');
+    const down = this._keys.has('ArrowDown');
+    if (up && !down) this._verticalInput = 1;
+    else if (down && !up) this._verticalInput = -1;
+    else if (!up && !down && this.upPointerId === null && this.downPointerId === null) {
+      this._verticalInput = 0;
+    }
+  }
+
+  // ── Desktop mouse look + pointer lock ──
+
+  private bindMouseLook(): void {
+    document.addEventListener('pointerlockchange', () => this.onPointerLockChange());
+
+    document.addEventListener('mousemove', (e: MouseEvent) => {
+      if (!this._pointerLocked) return;
+      this.lookDeltaX += e.movementX;
+      this.lookDeltaY += e.movementY;
+    });
+
+    // Left mouse on the tap zone:
+    //   - If not yet locked, acquire pointer lock (don't fire interact — that click was for locking).
+    //   - If locked, count as an interact press for the center-crosshair raycast.
+    this.tapZone.addEventListener('mousedown', (e: MouseEvent) => {
+      if (this._isTouchDevice || e.button !== 0) return;
+      if (this.container.classList.contains('flat-controls-hidden')) return;
+      // While drawing the cursor is intentionally free so the user can sketch — let the
+      // drawing canvas receive the click instead of grabbing pointer lock.
+      if (this._drawMode) return;
+      if (!this._pointerLocked) {
+        e.preventDefault();
+        e.stopPropagation();
+        this.requestPointerLock();
+      } else {
+        this._interactPressed = true;
+      }
+    });
+  }
+
+  private requestPointerLock(): void {
+    if (this._isTouchDevice) return;
+    try {
+      this.tapZone.requestPointerLock();
+    } catch {
+      // ignore — overlay click-to-resume handles recovery
+    }
+  }
+
+  private onPointerLockChange(): void {
+    this._pointerLocked = document.pointerLockElement === this.tapZone;
+    if (this._pointerLocked) {
+      this._lockLostOverlay.classList.remove('visible');
+    } else if (
+      !this.container.classList.contains('flat-controls-hidden')
+      && !this._isTouchDevice
+      && !this._drawMode
+    ) {
+      this._lockLostOverlay.classList.add('visible');
+    } else {
+      this._lockLostOverlay.classList.remove('visible');
+    }
+  }
+
+  private makeKeyHint(label: string): HTMLSpanElement {
+    const span = document.createElement('span');
+    span.className = 'flat-key-hint';
+    span.textContent = label;
+    return span;
   }
 
   setOnDrawToggle(cb: (active: boolean) => void): void {

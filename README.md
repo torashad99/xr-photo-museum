@@ -195,7 +195,7 @@ Creates a `.link-room` marker file and always serves the same room across sessio
 
 ---
 
-### Flat Mode (Mobile / Desktop)
+### Flat Mode (Mobile / Touch)
 
 **Museum Gallery:**
 
@@ -222,6 +222,36 @@ Creates a `.link-room` marker file and always serves the same room across sessio
 | Draw | Tap **✏** button |
 | Adjust splat | Aim crosshair at adjust panel buttons and tap |
 | Return to gallery | Tap **Return to Museum** button (top-center) |
+
+---
+
+### Flat Mode (Desktop — Mouse + Keyboard)
+
+When loaded in a desktop browser without WebXR, flat mode auto-locks the mouse for look controls. Press **Esc** to release the mouse; click anywhere to re-acquire it. Key-hint badges on the on-screen buttons echo the shortcuts below.
+
+**Museum Gallery:**
+
+| Action | Control |
+|--------|---------|
+| Look around | Mouse move (pointer-locked) |
+| Move | **W** / **A** / **S** / **D** |
+| Interact | **Left click** — aims from the center crosshair |
+| Add photo to frame | Aim crosshair at **+** marker and **left click** |
+| Toggle voice-note mode | **V** key |
+| Toggle drawing mode | **B** key |
+| Release mouse | **Esc** (click to re-acquire) |
+
+**Gaussian Splat World (Flat):**
+
+| Action | Control |
+|--------|---------|
+| Look around | Mouse move |
+| Fly forward/back/strafe | **W** / **A** / **S** / **D** |
+| Fly up | **↑** (Arrow Up) |
+| Fly down | **↓** (Arrow Down) |
+| Return to museum | **M** key |
+| Toggle voice / drawing | **V** / **B** |
+| Adjust splat | Aim crosshair at adjust panel buttons and **left click** |
 
 ---
 
