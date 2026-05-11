@@ -81,8 +81,24 @@ export function createMuseumRoom(world: World): { roomEntity: Entity; floorEntit
   spotLight.castShadow = true;
   roomGroup.add(spotLight);
 
-  // FIX: Use entity.addComponent instead of world.addComponent
-  // Assuming MuseumRoom is the Component definition
+  // Invisible wall colliders for VR locomotion boundaries.
+  // Each wall is a thin box marked as LocomotionEnvironment so the locomotion
+  // engine treats it as solid geometry the player can't walk/teleport through.
+  const wallColliders = [
+    { pos: [0, 2.5, -10] as const, size: [20, 5, 0.3] as const },  // Back
+    { pos: [0, 2.5, 10] as const, size: [20, 5, 0.3] as const },   // Front
+    { pos: [-10, 2.5, 0] as const, size: [0.3, 5, 20] as const },  // Left
+    { pos: [10, 2.5, 0] as const, size: [0.3, 5, 20] as const },   // Right
+  ];
+  for (const wc of wallColliders) {
+    const geo = new THREE.BoxGeometry(wc.size[0], wc.size[1], wc.size[2]);
+    const mat = new THREE.MeshBasicMaterial({ visible: false });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(wc.pos[0], wc.pos[1], wc.pos[2]);
+    const wallEntity = world.createTransformEntity(mesh);
+    wallEntity.addComponent(LocomotionEnvironment);
+  }
+
   roomEntity.addComponent(MuseumRoom);
 
   return { roomEntity, floorEntity };

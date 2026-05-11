@@ -1,5 +1,5 @@
 // src/index.ts
-import { World, Entity } from '@iwsdk/core';
+import { World, Entity, launchXR } from '@iwsdk/core';
 import { XRInputVisualAdapter, AnimatedController, InputComponent } from '@iwsdk/xr-input';
 import * as THREE from 'three';
 import { createMuseumRoom, PhotoFrame } from './components/MuseumRoom';
@@ -20,6 +20,9 @@ import { createTrashConfirmDialog, TrashConfirmHandle } from './components/Trash
 import { GaussianSplatWorld } from './components/GaussianSplatWorld';
 import { WorldLabsService, SplatResult } from './services/WorldLabsService';
 import { FlatModeOverlay, FlatModeInput } from './components/FlatModeOverlay';
+import { FlatModeDrawing } from './components/FlatModeDrawing';
+import { FlatModeVoiceRecorder } from './components/FlatModeVoiceRecorder';
+import './styles/flat-mode.css';
 
 class PhotoMuseumApp {
   private world!: World;
@@ -69,6 +72,8 @@ class PhotoMuseumApp {
 
   // Flat mode (mobile fallback)
   private flatMode: FlatModeOverlay | null = null;
+  private flatDrawing: FlatModeDrawing | null = null;
+  private flatVoiceRecorder: FlatModeVoiceRecorder | null = null;
   private flatYaw = 0;
   private flatPitch = 0;
   private flatPosition = new THREE.Vector3(0, 1.6, 0);
@@ -113,9 +118,11 @@ class PhotoMuseumApp {
     // auto-offer — phones hang when IWSDK tries to offer a session they can't support.
     const isFlatMode = await this.detectFlatMode();
 
+    // Always disable auto-offer — we gate XR entry behind an intro screen on headsets,
+    // and flat mode never enters XR.
     this.world = await World.create(container, {
       features: { locomotion: true },
-      ...(isFlatMode ? { xr: { offer: 'none' as any } } : {}),
+      xr: { offer: 'none' as any },
     });
     console.log('[Init] World created successfully');
 
@@ -257,6 +264,37 @@ class PhotoMuseumApp {
         }
         // Show entry splash; controls hidden until user taps "Enter"
         this.flatMode.showEntryScreen();
+
+        // Initialize flat-mode creative tools
+        const tapZone = overlayContainer.querySelector('.flat-tap-zone') as HTMLElement;
+        if (tapZone) {
+          this.flatDrawing = new FlatModeDrawing(this.world, this.multiplayer, tapZone);
+          this.flatMode.setOnDrawToggle((active) => {
+            if (active) {
+              this.flatDrawing!.setCamera(this.world.scene.getObjectByProperty('isCamera', true) as THREE.Camera);
+              this.flatDrawing!.enter();
+            } else {
+              this.flatDrawing!.exit();
+            }
+          });
+        }
+
+        this.flatVoiceRecorder = new FlatModeVoiceRecorder(this.world, this.multiplayer, overlayContainer);
+        this.flatMode.setOnMicToggle(() => {
+          if (this.flatVoiceRecorder!.isRecording) return; // stop handled via banner button
+          this.flatMode!.setMicActive(true);
+          this.flatVoiceRecorder!.startRecording();
+        });
+      }
+    } else {
+      // XR-capable device (Quest headset) — show intro screen before entering VR.
+      // launchXR must be called inside the user gesture (pointerdown/click) because
+      // Quest Browser requires requestSession to originate from a user activation.
+      const isLocalhost = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+      if (!isLocalhost) {
+        this.showXRIntroScreen(() => launchXR(this.world));
+      } else {
+        launchXR(this.world);
       }
     }
 
@@ -292,6 +330,39 @@ class PhotoMuseumApp {
     } catch {
       return true;
     }
+  }
+
+  private showXRIntroScreen(onEnter: () => void): void {
+    const overlay = document.createElement('div');
+    overlay.className = 'xr-intro-splash';
+
+    const title = document.createElement('div');
+    title.className = 'xr-intro-title';
+    title.textContent = 'XR Photo Museum';
+    overlay.appendChild(title);
+
+    const msg = document.createElement('div');
+    msg.className = 'xr-intro-message';
+    msg.textContent = "Photos can't be uploaded from the headset yet. Visit the link below from iOS, Android, or Desktop to upload photos.";
+    overlay.appendChild(msg);
+
+    const roomUrl = window.location.href;
+    const link = document.createElement('div');
+    link.className = 'xr-intro-link';
+    link.textContent = roomUrl;
+    overlay.appendChild(link);
+
+    const btn = document.createElement('button');
+    btn.className = 'xr-intro-btn';
+    btn.textContent = 'Enter VR Experience';
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      overlay.remove();
+      onEnter();
+    });
+    overlay.appendChild(btn);
+
+    document.body.appendChild(overlay);
   }
 
   private setupMultiplayerCallbacks(): void {
@@ -632,6 +703,8 @@ class PhotoMuseumApp {
       if (this.inviteLinkMesh) this.inviteLinkMesh.visible = false;
       this.currentSplatContext = ctx;
       this.creativeInput?.setContext(ctx);
+      this.flatDrawing?.setContext(ctx);
+      this.flatVoiceRecorder?.setContext(ctx);
 
       // Load splat with per-slot rotation/scale
       this.gaussianSplatWorld = new GaussianSplatWorld(this.world);
@@ -707,6 +780,8 @@ class PhotoMuseumApp {
     showDrawingsInContext('museum');
     if (this.inviteLinkMesh) this.inviteLinkMesh.visible = true;
     this.creativeInput?.setContext('museum');
+    this.flatDrawing?.setContext('museum');
+    this.flatVoiceRecorder?.setContext('museum');
     this.currentSplatContext = null;
 
     // Restore the PortalUI for whichever frame we just exited
@@ -1189,6 +1264,24 @@ class PhotoMuseumApp {
       // ── Flat mode: camera + movement (runs in both gallery and splat) ──
       if (this.flatMode) {
         const flatInput = this.flatMode.getInput();
+
+        // Voice recorder stop check (user tapped Stop button on banner)
+        if (this.flatVoiceRecorder?.stopRequested) {
+          this.flatVoiceRecorder.stopRecording(camera);
+          this.flatMode.setMicActive(false);
+        }
+
+        // Update drawing camera reference each frame
+        if (this.flatDrawing && this.flatMode.isDrawMode) {
+          this.flatDrawing.setCamera(camera);
+        }
+
+        // Skip look-drag when actively drawing (drawing consumes pointer events)
+        if (this.flatDrawing?.isDrawing) {
+          // Consume look delta so it doesn't rotate camera while drawing
+          flatInput.lookDelta.x = 0;
+          flatInput.lookDelta.y = 0;
+        }
 
         this.applyFlatModeCamera(flatInput, delta);
 

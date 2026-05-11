@@ -52,6 +52,14 @@ export class FlatModeOverlay {
   private _interactPressed = false;
   private _returnPressed = false;
 
+  // Creative toolbar
+  private toolbar: HTMLDivElement;
+  private drawBtn: HTMLDivElement;
+  private micBtn: HTMLDivElement;
+  private _drawMode = false;
+  private _onDrawToggle: ((active: boolean) => void) | null = null;
+  private _onMicToggle: (() => void) | null = null;
+
   private entryResolve: (() => void) | null = null;
 
   constructor(overlayContainer: HTMLElement) {
@@ -95,11 +103,26 @@ export class FlatModeOverlay {
     this.returnBtn.textContent = 'Return to Museum';
     this.container.appendChild(this.returnBtn);
 
+    // ── Creative toolbar (mic + draw) — mirrors XR: left hand = voice, right hand = draw ──
+    this.toolbar = this.createDiv('flat-toolbar');
+    this.micBtn = this.createDiv('flat-toolbar-btn');
+    this.micBtn.textContent = '🎤'; // microphone
+    this.micBtn.title = 'Voice Note';
+    this.toolbar.appendChild(this.micBtn);
+
+    this.drawBtn = this.createDiv('flat-toolbar-btn');
+    this.drawBtn.textContent = '✏'; // pencil
+    this.drawBtn.title = 'Draw';
+    this.toolbar.appendChild(this.drawBtn);
+
+    this.container.appendChild(this.toolbar);
+
     // ── Event listeners ──
     this.bindJoystick(this.leftStick);
     this.bindTouchLook();
     this.bindVerticalButtons();
     this.bindReturnButton();
+    this.bindToolbar();
   }
 
   // ── Public API ──
@@ -355,6 +378,45 @@ export class FlatModeOverlay {
       e.stopPropagation();
       this._returnPressed = true;
     });
+  }
+
+  // ── Toolbar ──
+
+  private bindToolbar(): void {
+    this.drawBtn.addEventListener('pointerdown', (e: PointerEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      this._drawMode = !this._drawMode;
+      this.drawBtn.classList.toggle('active', this._drawMode);
+      this._onDrawToggle?.(this._drawMode);
+    });
+
+    this.micBtn.addEventListener('pointerdown', (e: PointerEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      this._onMicToggle?.();
+    });
+  }
+
+  setOnDrawToggle(cb: (active: boolean) => void): void {
+    this._onDrawToggle = cb;
+  }
+
+  setOnMicToggle(cb: () => void): void {
+    this._onMicToggle = cb;
+  }
+
+  get isDrawMode(): boolean {
+    return this._drawMode;
+  }
+
+  setDrawActive(active: boolean): void {
+    this._drawMode = active;
+    this.drawBtn.classList.toggle('active', active);
+  }
+
+  setMicActive(active: boolean): void {
+    this.micBtn.classList.toggle('active', active);
   }
 
   // ── Helpers ──
