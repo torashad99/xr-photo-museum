@@ -1,6 +1,6 @@
 # Photo to World - Immersive WebXR Photo Museum
 
-An immersive multiplayer WebXR photo gallery built with Meta's [IWSDK](https://iwsdk.dev/), [Three.js](https://threejs.org/), [SparkJS](https://sparkjs.dev/), and Socket.io, with Gaussian Splats powered by [World Labs](https://worldlabs.ai/). Explore galleries with friends in VR / Mobile, upload photos (from Mobile only), and transform them into interactive Gaussian Splat worlds.
+An immersive multiplayer WebXR photo gallery built with Meta's [IWSDK](https://iwsdk.dev/), [Three.js](https://threejs.org/), [SparkJS](https://sparkjs.dev/), and [Socket.io](https://socket.io/), with Gaussian Splats powered by [World Labs](https://worldlabs.ai/). Explore galleries with friends in VR / Mobile, upload photos (from Mobile only), and transform them into interactive Gaussian Splat worlds.
 
 **Landing Page:** https://papaya-longma-d02e97.netlify.app/
 
@@ -161,6 +161,67 @@ npm run server -- -link demo
 ```
 
 Creates a `.link-room` marker file and always serves the same room across sessions.
+
+---
+
+## Controls
+
+### VR Mode
+
+**Museum Gallery:**
+
+| Action | Control |
+|--------|---------|
+| Move | Left thumbstick (slide locomotion) |
+| Turn | Right thumbstick (snap or smooth turn) |
+| Teleport | Point right controller and press right thumbstick down  |
+| Interact with buttons | Move controller tip into a button (proximity-based) |
+| Record voice note | Hold **left trigger** — release to place at hand position |
+| Draw in 3D | Hold **right trigger** — move hand to draw strokes |
+| Play voice note | Touch controller tip to a red voice note sphere |
+| Enter splat world | Touch "Enter World" button on a frame with a generated splat |
+| Delete a splat | Touch the trash icon on a frame's portal UI (will not delete if a user is still in world or if the original user didn't create it)|
+
+**Gaussian Splat World:**
+
+| Action | Control |
+|--------|---------|
+| Fly forward/back/strafe | Left thumbstick |
+| Fly up/down | Right thumbstick (up/down) |
+| Adjust splat position | Use the floating adjust panel buttons |
+| Record voice note | Hold **left trigger** |
+| Draw in 3D | Hold **right trigger** |
+| Return to gallery | Fly to the boundary — "Go Back to Gallery" prompt appears |
+
+---
+
+### Flat Mode (Mobile / Desktop)
+
+**Museum Gallery:**
+
+| Action | Control |
+|--------|---------|
+| Look around | Drag on screen (touch) or mouse drag |
+| Move | Left joystick (on-screen, bottom-left) |
+| Interact | Tap on screen — aims from the center crosshair |
+| Add photo to frame | Aim crosshair at **+** marker and tap |
+| Record voice note | Tap **🎤** button (bottom toolbar) — tap **Stop** on the recording banner |
+| Draw | Tap **✏** button (bottom toolbar) — drag on screen to draw strokes on a plane in front of you; tap button again to exit draw mode |
+| Play voice note | Aim crosshair at a red voice note sphere and tap |
+| Generate splat | Aim at "Generate World" button and tap |
+| Enter splat world | Aim at "Enter World" button and tap |
+
+**Gaussian Splat World (Flat):**
+
+| Action | Control |
+|--------|---------|
+| Look around | Drag on screen |
+| Fly forward/back/strafe | Left joystick (on-screen) |
+| Fly up/down | **▲** / **▼** buttons (on-screen, bottom-right) |
+| Record voice note | Tap **🎤** button |
+| Draw | Tap **✏** button |
+| Adjust splat | Aim crosshair at adjust panel buttons and tap |
+| Return to gallery | Tap **Return to Museum** button (top-center) |
 
 ---
 
