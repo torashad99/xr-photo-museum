@@ -1223,27 +1223,55 @@ class PhotoMuseumApp {
    * Called each frame only while in the gallery and splat world.
    */
   private handleVoiceNoteXRInteraction(): void {
+    // Bail before the XR session is active. XROrigin creates raySpaces.left/right
+    // as Groups at construction time, so they exist even outside a session — and
+    // their matrixWorld is identity (world position 0,0,0) until a pose arrives.
+    // Voice notes loaded synchronously during joinRoom also start with identity
+    // matrixWorld until the next render, so without this gate the very first
+    // wrapped-update frame would see every voice-note sphere coincident with a
+    // (0,0,0) tip and fire onClick on all of them at once.
+    if (!this.world.session) {
+      this._touchedVoiceSpheres.clear();
+      return;
+    }
+
     const spheres = getVoiceNoteSpheres();
     if (spheres.length === 0) {
       this._touchedVoiceSpheres.clear();
       return;
     }
 
-    // Collect all controller/hand tip positions
+    // Collect tracked tip positions. raySpaces are only valid tips when the
+    // corresponding gamepad is defined — IWSDK populates gamepads[handedness]
+    // only after an inputsourceschange event with a tracked controller, which
+    // guards against the one- or two-frame window where the session is active
+    // but the controller pose hasn't been applied yet.
     const tips: THREE.Vector3[] = [];
-    const raySpaces = (this.world.input as any).xrOrigin?.raySpaces;
-    if (raySpaces?.left)  tips.push(new THREE.Vector3().setFromMatrixPosition(raySpaces.left.matrixWorld));
-    if (raySpaces?.right) tips.push(new THREE.Vector3().setFromMatrixPosition(raySpaces.right.matrixWorld));
+    const input = this.world.input as any;
+    const raySpaces = input.xrOrigin?.raySpaces;
+    const gamepads = input.gamepads;
+    if (raySpaces?.left && gamepads?.left)
+      tips.push(raySpaces.left.getWorldPosition(new THREE.Vector3()));
+    if (raySpaces?.right && gamepads?.right)
+      tips.push(raySpaces.right.getWorldPosition(new THREE.Vector3()));
     const hands = this.world.input.visualAdapters?.hand;
     if (hands?.left?.connected && hands.left.gripSpace)
-      tips.push(new THREE.Vector3().setFromMatrixPosition(hands.left.gripSpace.matrixWorld));
+      tips.push(hands.left.gripSpace.getWorldPosition(new THREE.Vector3()));
     if (hands?.right?.connected && hands.right.gripSpace)
-      tips.push(new THREE.Vector3().setFromMatrixPosition(hands.right.gripSpace.matrixWorld));
+      tips.push(hands.right.gripSpace.getWorldPosition(new THREE.Vector3()));
+
+    if (tips.length === 0) {
+      this._touchedVoiceSpheres.clear();
+      return;
+    }
 
     const TOUCH_RADIUS = 0.12; // sphere radius 0.06 + 0.06 tolerance
 
     for (const sphere of spheres) {
-      const center = new THREE.Vector3().setFromMatrixPosition(sphere.matrixWorld);
+      // getWorldPosition() forces a fresh matrixWorld — protects against the
+      // case where a voice note was created via socket between renders and
+      // its matrixWorld is still identity.
+      const center = sphere.getWorldPosition(new THREE.Vector3());
       const isTouching = tips.some(tip => tip.distanceTo(center) < TOUCH_RADIUS);
 
       if (isTouching && !this._touchedVoiceSpheres.has(sphere)) {
