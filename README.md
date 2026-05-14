@@ -1,6 +1,6 @@
 # Photo to World - Immersive WebXR Photo Museum
 
-An immersive multiplayer WebXR photo gallery built with Meta's [IWSDK](https://iwsdk.dev/), [Three.js](https://threejs.org/), [SparkJS](https://sparkjs.dev/), and [Socket.io](https://socket.io/), with Gaussian Splats powered by [World Labs](https://worldlabs.ai/). Explore galleries with friends in VR / Mobile, upload photos (from Mobile only), and transform them into interactive Gaussian Splat worlds.
+An immersive multiplayer WebXR photo gallery built with Meta's [IWSDK](https://iwsdk.dev/), [Three.js](https://threejs.org/), [SparkJS](https://sparkjs.dev/), and [Socket.io](https://socket.io/), with Gaussian Splats powered by [World Labs](https://worldlabs.ai/). Explore galleries with friends in VR / Mobile / Desktop, upload photos (from Mobile and Desktop only), and transform them into interactive Gaussian Splat worlds.
 
 **Landing Page:** https://papaya-longma-d02e97.netlify.app/
 
