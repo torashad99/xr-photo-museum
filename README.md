@@ -19,7 +19,6 @@ An immersive, cross-platform multiplayer WebXR photo gallery built with Meta's [
 - ⚠️ **Google Photos integration** — OAuth flow is not yet fully implemented and is currently hidden from the UI
 
 ### 🎨 Creative Tools
-- **Annotations** — add text labels and comments to photos
 - **3D Drawing** — draw freehand strokes in 3D space using hand tracking or controllers
 - **Voice Notes** — record audio annotations (requires microphone access in XR)
 
@@ -29,9 +28,9 @@ An immersive, cross-platform multiplayer WebXR photo gallery built with Meta's [
 - **Link mode** — lock the server to a single room for persistent shared experiences
 
 ### 🥽 Platform Support
-- **Meta Quest 3/3S** — full WebXR support with controllers and hand tracking
-- **PC VR** — compatible with SteamVR and other WebXR-capable headsets
-- **Mobile/Desktop fallback** — Minecraft PE-style flat mode with screen-drag look controls
+- **Meta Quest 3/3S/Pro/2** — full WebXR support with controllers and hand tracking
+- **Any VR Headset (Theoretical)** — compatible with other WebXR-capable headsets
+- **Mobile/Desktop fallback** — Minecraft PE-style flat mode with touch controls for Mobile, and Keyboard + Mouse for desktop
 
 ---
 
