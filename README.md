@@ -28,7 +28,7 @@ An immersive, cross-platform multiplayer WebXR photo gallery built with Meta's [
 - **Link mode** — lock the server to a single room for persistent shared experiences
 
 ### 🥽 Platform Support
-- **Meta Quest 3/3S/Pro/2** — full WebXR support with controllers and hand tracking
+- **Meta Quest 3/3S/Pro/2** — full WebXR support with controllers only
 - **Any VR Headset (Theoretical)** — compatible with other WebXR-capable headsets
 - **Mobile/Desktop fallback** — Minecraft PE-style flat mode with touch controls for Mobile, and Keyboard + Mouse for desktop
 
