@@ -20,7 +20,7 @@ An immersive, cross-platform multiplayer WebXR photo gallery built with Meta's [
 
 ### 🎨 Creative Tools
 - **3D Drawing** — draw freehand strokes in 3D space using hand tracking or controllers
-- **Voice Notes** — record audio annotations (requires microphone access in XR)
+- **Voice Notes** — record audio annotations (requires microphone access)
 
 ### 🌍 Multiplayer
 - **Shared rooms** — two-word passphrase system (e.g., `tiger-moon`) for easy invites
